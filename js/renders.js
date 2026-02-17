@@ -18,7 +18,6 @@ const Renders = {
                 return null;
             }
             
-            // Check content type before parsing JSON
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
                 const text = await response.text();
@@ -41,16 +40,14 @@ const Renders = {
         
         if (!panel || !content) return;
         
-        titleEl.textContent = title || 'Visualizacion';
-        content.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:none;border-radius:8px;"></iframe>`;
+        titleEl.textContent = title || 'Visualización';
+        content.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:none;border-radius:8px;background:#fff;"></iframe>`;
         panel.classList.add('open');
         
-        // Update toggle button state
         const toggle = document.getElementById('previewToggle');
         if (toggle) toggle.classList.add('active');
     },
 
-    // Close sidebar
     closeSidebar() {
         const panel = document.getElementById('previewPanel');
         if (panel) panel.classList.remove('open');
@@ -59,7 +56,6 @@ const Renders = {
         if (toggle) toggle.classList.remove('active');
     },
 
-    // Create a render button for inline display
     createButton(label, icon, onClick) {
         const btn = document.createElement('button');
         btn.className = 'render-btn';
@@ -79,54 +75,119 @@ const Renders = {
         const zoom = options.zoom || 11;
         const title = options.title || 'Ubicaciones';
         
-        // Generate markers JavaScript
         const markersJs = locations.map((loc, i) => {
             const color = this.getPriceColor(loc.price);
             const popupContent = `
                 <div class="popup-title">${this.escapeHtml(loc.title || 'Propiedad')}</div>
                 ${loc.price ? '<div class="popup-price">$' + (loc.price/1000000).toFixed(0) + ' millones</div>' : ''}
-                ${loc.size ? '<div class="popup-size">\ud83d\udcd0 ' + this.escapeHtml(loc.size) + '</div>' : ''}
+                ${loc.size ? '<div class="popup-size">📐 ' + this.escapeHtml(loc.size) + '</div>' : ''}
                 ${loc.description ? '<div class="popup-desc">' + this.escapeHtml(loc.description) + '</div>' : ''}
-                ${loc.url ? '<a href="' + this.escapeHtml(loc.url) + '" target="_blank" class="popup-link">Ver detalles \u2192</a>' : ''}
-            `.replace(/\n/g, '');
+                ${loc.url ? '<a href="' + this.escapeHtml(loc.url) + '" target="_blank" class="popup-link">Ver detalles →</a>' : ''}
+            `.replace(/\n/g, '').replace(/'/g, "\\'");
             
             return `
                 L.circleMarker([${loc.lat}, ${loc.lng}], {
-                    radius: 10,
+                    radius: 12,
                     fillColor: '${color}',
                     color: '#fff',
                     weight: 3,
                     opacity: 1,
                     fillOpacity: 0.9
-                }).addTo(map).bindPopup(\`${popupContent}\`);
+                }).addTo(map).bindPopup('${popupContent}');
             `;
         }).join('\n');
         
         return `
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                html, body { width: 100%; height: 100%; }
+                #map { width: 100%; height: 100%; }
+                .popup-title { font-weight: bold; color: #2d5a27; margin-bottom: 8px; font-size: 14px; }
+                .popup-price { font-size: 16px; font-weight: bold; color: #1a73e8; margin-bottom: 6px; }
+                .popup-size { color: #666; margin-bottom: 6px; font-size: 13px; }
+                .popup-desc { font-size: 12px; color: #444; margin-bottom: 10px; line-height: 1.4; }
+                .popup-link { 
+                    display: inline-block; 
+                    background: #1a73e8; 
+                    color: white !important; 
+                    padding: 6px 12px; 
+                    border-radius: 4px; 
+                    text-decoration: none; 
+                    font-size: 12px;
+                }
+                .popup-link:hover { background: #1557b0; }
+                .legend {
+                    background: white;
+                    padding: 12px 16px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                    font-size: 13px;
+                    line-height: 1.8;
+                }
+                .legend h4 { margin-bottom: 8px; color: #333; font-size: 14px; }
+                .legend-item { display: flex; align-items: center; gap: 8px; }
+                .legend-color {
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 50%;
+                    border: 2px solid white;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                }
+            </style>
             <div id="map"></div>
             <script>
-                const map = L.map('map').setView([${center[0]}, ${center[1]}], ${zoom});
+                // Wait for DOM to be ready
+                document.addEventListener('DOMContentLoaded', function() {
+                    initMap();
+                });
                 
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '\u00a9 OpenStreetMap'
-                }).addTo(map);
+                // Also try immediately in case DOMContentLoaded already fired
+                if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                    setTimeout(initMap, 100);
+                }
                 
-                ${markersJs}
+                var mapInitialized = false;
                 
-                // Add legend
-                const legend = L.control({ position: 'bottomright' });
-                legend.onAdd = function() {
-                    const div = L.DomUtil.create('div', 'legend');
-                    div.innerHTML = \`
-                        <h4>\ud83c\udfe1 Precios</h4>
-                        <div class="legend-item"><div class="legend-color" style="background:#22c55e"></div> Hasta $30M</div>
-                        <div class="legend-item"><div class="legend-color" style="background:#3b82f6"></div> $30M - $80M</div>
-                        <div class="legend-item"><div class="legend-color" style="background:#f59e0b"></div> $80M - $150M</div>
-                        <div class="legend-item"><div class="legend-color" style="background:#ef4444"></div> Mas de $150M</div>
-                    \`;
-                    return div;
-                };
-                legend.addTo(map);
+                function initMap() {
+                    if (mapInitialized) return;
+                    mapInitialized = true;
+                    
+                    var map = L.map('map', {
+                        center: [${center[0]}, ${center[1]}],
+                        zoom: ${zoom},
+                        zoomControl: true
+                    });
+                    
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '© OpenStreetMap',
+                        maxZoom: 18
+                    }).addTo(map);
+                    
+                    ${markersJs}
+                    
+                    // Add legend
+                    var legend = L.control({ position: 'bottomright' });
+                    legend.onAdd = function() {
+                        var div = L.DomUtil.create('div', 'legend');
+                        div.innerHTML = '<h4>🏡 Precios</h4>' +
+                            '<div class="legend-item"><div class="legend-color" style="background:#22c55e"></div> Hasta $30M</div>' +
+                            '<div class="legend-item"><div class="legend-color" style="background:#3b82f6"></div> $30M - $80M</div>' +
+                            '<div class="legend-item"><div class="legend-color" style="background:#f59e0b"></div> $80M - $150M</div>' +
+                            '<div class="legend-item"><div class="legend-color" style="background:#ef4444"></div> Más de $150M</div>';
+                        return div;
+                    };
+                    legend.addTo(map);
+                    
+                    // Fix tile loading issue - invalidate size after a delay
+                    setTimeout(function() {
+                        map.invalidateSize();
+                    }, 200);
+                    
+                    // Also invalidate on window resize
+                    window.addEventListener('resize', function() {
+                        map.invalidateSize();
+                    });
+                }
             </script>
         `;
     },
@@ -149,12 +210,20 @@ const Renders = {
         });
         
         return `
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                html, body { width: 100%; height: 100%; background: #fff; }
+                #chart-container { width: 100%; height: 100%; padding: 20px; }
+                canvas { width: 100% !important; height: 100% !important; }
+            </style>
             <div id="chart-container">
                 <canvas id="${chartId}"></canvas>
             </div>
             <script>
-                const ctx = document.getElementById('${chartId}').getContext('2d');
-                new Chart(ctx, ${configJson});
+                document.addEventListener('DOMContentLoaded', function() {
+                    var ctx = document.getElementById('${chartId}').getContext('2d');
+                    new Chart(ctx, ${configJson});
+                });
             </script>
         `;
     },
@@ -178,16 +247,29 @@ const Renders = {
         }).join('');
         
         return `
-            <table class="data-table">
-                <thead><tr>${headerHtml}</tr></thead>
-                <tbody>${rowsHtml}</tbody>
-            </table>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                html, body { width: 100%; height: 100%; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+                .table-container { width: 100%; height: 100%; padding: 20px; overflow: auto; }
+                .data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+                .data-table th { background: #f1f5f9; padding: 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e2e8f0; }
+                .data-table td { padding: 12px; border-bottom: 1px solid #e2e8f0; }
+                .data-table tr:hover { background: #f8fafc; }
+                .data-table a { color: #1a73e8; text-decoration: none; }
+                .data-table a:hover { text-decoration: underline; }
+                .price { font-weight: 600; color: #059669; }
+            </style>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead><tr>${headerHtml}</tr></thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
         `;
     },
 
-    // Helper: Calculate center from locations
     calculateCenter(locations) {
-        if (!locations || locations.length === 0) return [-38.9, -71.8]; // Default: Chile
+        if (!locations || locations.length === 0) return [-38.9, -71.8];
         const lats = locations.map(l => l.lat);
         const lngs = locations.map(l => l.lng);
         return [
@@ -196,16 +278,14 @@ const Renders = {
         ];
     },
 
-    // Helper: Get color based on price
     getPriceColor(price) {
         if (!price) return '#3b82f6';
-        if (price < 30000000) return '#22c55e';  // Green - affordable
-        if (price < 80000000) return '#3b82f6';  // Blue - mid range
-        if (price < 150000000) return '#f59e0b'; // Orange - high
-        return '#ef4444';                         // Red - premium
+        if (price < 30000000) return '#22c55e';
+        if (price < 80000000) return '#3b82f6';
+        if (price < 150000000) return '#f59e0b';
+        return '#ef4444';
     },
 
-    // Helper: Escape HTML
     escapeHtml(str) {
         if (!str) return '';
         const div = document.createElement('div');
@@ -213,11 +293,8 @@ const Renders = {
         return div.innerHTML;
     },
 
-    // Parse render commands from Claude's response
     parseRenderCommands(text) {
         const renders = [];
-        
-        // Pattern: :::render-TYPE{title="Title"}\n...JSON...\n:::
         const pattern = /:::render-(\w+)(?:\{([^}]*)\})?\n([\s\S]*?)\n:::/g;
         let match;
         
@@ -227,7 +304,6 @@ const Renders = {
                 const attrsStr = match[2] || '';
                 const content = match[3].trim();
                 
-                // Parse attributes
                 const attrs = {};
                 attrsStr.split(' ').forEach(attr => {
                     const [key, val] = attr.split('=');
@@ -236,12 +312,11 @@ const Renders = {
                     }
                 });
                 
-                // Parse JSON content
                 const data = JSON.parse(content);
                 
                 renders.push({
                     type: type,
-                    title: attrs.title || data.title || 'Visualizacion',
+                    title: attrs.title || data.title || 'Visualización',
                     data: data,
                     raw: match[0]
                 });
@@ -253,7 +328,6 @@ const Renders = {
         return renders;
     },
 
-    // Process message and create renders
     async processMessage(text, container) {
         const renders = this.parseRenderCommands(text);
         let processedText = text;
@@ -275,11 +349,9 @@ const Renders = {
                     continue;
             }
             
-            // Save render and get URL
             const result = await this.save(render.type, render.title, html);
             
             if (result && result.url) {
-                // Replace render command with button
                 const buttonId = 'render_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
                 const buttonHtml = `<button class="render-btn" id="${buttonId}" data-url="${result.url}" data-title="${this.escapeHtml(render.title)}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -290,7 +362,6 @@ const Renders = {
                 
                 processedText = processedText.replace(render.raw, buttonHtml);
             } else {
-                // Remove render command if failed
                 processedText = processedText.replace(render.raw, '');
             }
         }
@@ -298,7 +369,6 @@ const Renders = {
         return processedText;
     },
 
-    // Get icon SVG for render type
     getIconForType(type) {
         switch (type) {
             case 'map':
@@ -312,9 +382,7 @@ const Renders = {
         }
     },
 
-    // Initialize event listeners
     init() {
-        // Delegate click events for render buttons
         document.addEventListener('click', (e) => {
             const btn = e.target.closest('.render-btn');
             if (btn) {
@@ -326,13 +394,11 @@ const Renders = {
             }
         });
         
-        // Close sidebar button
         const closeBtn = document.getElementById('closePreview');
         if (closeBtn) {
             closeBtn.addEventListener('click', () => this.closeSidebar());
         }
         
-        // Toggle sidebar button
         const toggleBtn = document.getElementById('previewToggle');
         if (toggleBtn) {
             toggleBtn.addEventListener('click', () => {
@@ -346,8 +412,5 @@ const Renders = {
     }
 };
 
-// Initialize on load
 document.addEventListener('DOMContentLoaded', () => Renders.init());
-
-// Make globally available
 window.Renders = Renders;
