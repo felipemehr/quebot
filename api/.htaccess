@@ -1,0 +1,21 @@
+# Proteger archivos de configuración
+<Files "config.php">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+# Permitir solo acceso al endpoint de chat
+<Files "chat.php">
+    Order Allow,Deny
+    Allow from all
+</Files>
+
+# Desactivar listado de directorio
+Options -Indexes
+
+# Seguridad adicional
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+</IfModule>

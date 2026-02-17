@@ -1,0 +1,43 @@
+==========================================
+DEPLOY DE QUEBOT EN GOOGLE CLOUD RUN
+==========================================
+
+PASO 1: Abrir Cloud Shell
+-------------------------
+1. Ve a console.cloud.google.com
+2. Haz clic en el icono de terminal [>_] arriba a la derecha
+3. Se abrirá Cloud Shell (terminal en el navegador)
+
+PASO 2: Subir el ZIP
+--------------------
+1. En Cloud Shell, haz clic en el icono de 3 puntos (⋮) 
+2. Selecciona "Upload" (Subir)
+3. Sube el archivo quebot-cloudrun.zip
+
+PASO 3: Ejecutar estos comandos (copia y pega)
+----------------------------------------------
+
+# Descomprimir
+unzip quebot-cloudrun.zip -d quebot
+cd quebot
+
+# Construir y subir a Cloud Run (todo en un comando)
+gcloud run deploy quebot \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --port 8080
+
+PASO 4: ¡Listo!
+---------------
+Al terminar, te dará una URL como:
+https://quebot-xxxxx-uc.a.run.app
+
+¡Esa es tu app funcionando!
+
+==========================================
+NOTAS:
+- La primera vez puede pedir habilitar APIs (di que sí)
+- El deploy tarda ~2-3 minutos
+- Es prácticamente gratis (solo pagas por uso)
+==========================================
