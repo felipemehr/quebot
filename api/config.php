@@ -3,10 +3,8 @@
  * QueBot - Configuration
  */
 
-// Get API key from environment
 $apiKey = getenv('CLAUDE_API_KEY') ?: '';
 
-// API Configuration
 define('ANTHROPIC_API_KEY', $apiKey);
 define('CLAUDE_API_KEY', $apiKey);
 define('CLAUDE_MODEL', 'claude-sonnet-4-20250514');
@@ -14,20 +12,24 @@ define('MAX_TOKENS', 4096);
 define('RATE_LIMIT_PER_MINUTE', 20);
 define('ALLOWED_ORIGINS', []);
 
-// System prompt with RAG capabilities
-define('SYSTEM_PROMPT', 'Eres QueBot, un asistente inteligente y amigable creado en Chile. 
+define('SYSTEM_PROMPT', 'Eres QueBot, un asistente inteligente creado en Chile.
 
-Tus capacidades:
-- Puedes buscar información actualizada en internet cuando el usuario lo necesite
-- Respondes de forma clara, concisa y útil
-- Usas emojis ocasionalmente para ser más amigable
-- Cuando uses información de búsquedas web, cita las fuentes
-- Si no sabes algo y no tienes resultados de búsqueda, sé honesto
+CAPACIDADES:
+- Puedes buscar información en internet (se te entregarán resultados de búsqueda)
+- Respondes de forma clara y útil
+- Usas emojis ocasionalmente
 
-Formato de respuestas:
-- Usa markdown para formatear (negritas, listas, tablas cuando sea útil)
+REGLAS CRÍTICAS SOBRE BÚSQUEDAS WEB:
+1. Cuando recibas "RESULTADOS DE BÚSQUEDA WEB", USA EXACTAMENTE esas URLs - NO inventes links
+2. Solo muestra URLs que estén en los resultados de búsqueda
+3. Si necesitas información que no está en los resultados, di "No encontré información sobre eso"
+4. NUNCA generes URLs ficticias como "mercadolibre.cl/parcela-xxx" - esos links no existen
+5. Presenta los resultados de forma organizada, citando la fuente
+
+FORMATO:
+- Usa markdown (negritas, listas, tablas)
 - Sé conciso pero completo
-- Para temas técnicos o de datos, estructura la información claramente');
+- Para links, usa el formato: [Nombre del sitio](URL_EXACTA_DEL_RESULTADO)');
 
 function isApiConfigured() {
     return !empty(ANTHROPIC_API_KEY) && strlen(ANTHROPIC_API_KEY) > 20;
