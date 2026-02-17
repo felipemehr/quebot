@@ -1,171 +1,47 @@
-/* ========================================
-   QueBot - Render System Styles
-   ======================================== */
-
-/* Render buttons in messages */
+/* Render Buttons */
 .render-btn {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     padding: 10px 16px;
-    margin: 8px 4px 8px 0;
-    background: linear-gradient(135deg, #2d5a3d 0%, #1e4a2d 100%);
+    margin: 8px 0;
+    background: linear-gradient(135deg, #1a5f2a 0%, #2d8a3e 100%);
     color: white;
     border: none;
     border-radius: 8px;
-    font-size: 0.875rem;
+    font-size: 14px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
-    box-shadow: 0 2px 4px rgba(45, 90, 61, 0.3);
+    box-shadow: 0 2px 4px rgba(26, 95, 42, 0.2);
 }
 
 .render-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(45, 90, 61, 0.4);
+    box-shadow: 0 4px 8px rgba(26, 95, 42, 0.3);
 }
 
 .render-btn:active {
     transform: translateY(0);
 }
 
-.render-btn svg {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
+.render-btn-map {
+    background: linear-gradient(135deg, #1a5f2a 0%, #2d8a3e 100%);
 }
 
-/* Multiple render buttons container */
-.render-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 12px 0;
+.render-btn-table {
+    background: linear-gradient(135deg, #1a4f7a 0%, #2a7ab8 100%);
 }
 
-/* Preview panel improvements */
-.preview-panel {
-    width: 50%;
-    min-width: 400px;
-    max-width: 800px;
+.render-btn-chart {
+    background: linear-gradient(135deg, #7a4f1a 0%, #b87a2a 100%);
 }
 
-.preview-panel .preview-content {
-    padding: 0;
-    height: calc(100% - 60px);
+/* Dark mode adjustments */
+[data-theme="dark"] .render-btn {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.preview-panel .preview-content iframe {
-    width: 100%;
-    height: 100%;
-    border: none;
-    background: white;
-}
-
-/* Inline map preview (smaller, in message) */
-.inline-map {
-    width: 100%;
-    height: 250px;
-    border-radius: 12px;
-    overflow: hidden;
-    margin: 12px 0;
-    border: 1px solid var(--border-color);
-}
-
-.inline-map iframe {
-    width: 100%;
-    height: 100%;
-    border: none;
-}
-
-/* Expand button for inline previews */
-.expand-btn {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 32px;
-    height: 32px;
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s;
-    z-index: 10;
-}
-
-.expand-btn:hover {
-    background: white;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-}
-
-.expand-btn svg {
-    width: 16px;
-    height: 16px;
-    color: var(--text-secondary);
-}
-
-/* Render type badges */
-.render-type-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    background: var(--bg-tertiary);
-    border-radius: 12px;
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-}
-
-.render-type-badge.map {
-    background: #dcfce7;
-    color: #166534;
-}
-
-.render-type-badge.chart {
-    background: #dbeafe;
-    color: #1e40af;
-}
-
-.render-type-badge.table {
-    background: #fef3c7;
-    color: #92400e;
-}
-
-[data-theme="dark"] .render-type-badge.map {
-    background: #14532d;
-    color: #86efac;
-}
-
-[data-theme="dark"] .render-type-badge.chart {
-    background: #1e3a5f;
-    color: #93c5fd;
-}
-
-[data-theme="dark"] .render-type-badge.table {
-    background: #451a03;
-    color: #fcd34d;
-}
-
-/* Responsive adjustments */
-@media (max-width: 1200px) {
-    .preview-panel {
-        width: 100%;
-        min-width: unset;
-        max-width: unset;
-    }
-}
-
-@media (max-width: 768px) {
-    .render-btn {
-        padding: 8px 12px;
-        font-size: 0.8125rem;
-    }
-    
-    .inline-map {
-        height: 200px;
-    }
+[data-theme="dark"] .render-btn:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
 }

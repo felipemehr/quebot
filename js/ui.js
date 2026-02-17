@@ -5,6 +5,8 @@
 
 const UI = {
     elements: {},
+    renderCounter: 0,
+    pendingRenders: {},
 
     /**
      * Inicializar referencias a elementos del DOM
@@ -116,6 +118,169 @@ const UI = {
     },
 
     /**
+     * Mostrar render en preview panel
+     */
+    showRenderPreview(renderId) {
+        const render = this.pendingRenders[renderId];
+        if (!render) {
+            console.error('Render not found:', renderId);
+            return;
+        }
+
+        let html = '';
+        
+        if (render.type === 'map') {
+            html = this.buildMapHtml(render.title, render.data);
+        } else if (render.type === 'table') {
+            html = this.buildTableHtml(render.title, render.data);
+        } else if (render.type === 'chart') {
+            html = this.buildChartHtml(render.title, render.data);
+        }
+
+        this.elements.previewTitle.textContent = render.title;
+        this.elements.previewContent.innerHTML = `<iframe srcdoc="${this.escapeHtmlAttribute(html)}" style="width:100%;height:100%;border:none;"></iframe>`;
+        this.elements.previewPanel.classList.add('open');
+        this.elements.previewToggle.classList.add('active');
+    },
+
+    /**
+     * Build map HTML
+     */
+    buildMapHtml(title, data) {
+        const locations = data.locations || [];
+        return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${this.escapeHtml(title)}</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; }
+        #map { width: 100%; height: 100%; }
+        .custom-popup { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .custom-popup h3 { margin: 0 0 8px; color: #1a5f2a; font-size: 14px; }
+        .custom-popup p { margin: 4px 0; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        const locations = ${JSON.stringify(locations)};
+        
+        // Calculate center
+        let centerLat = -38.84, centerLng = -71.68;
+        if (locations.length > 0) {
+            centerLat = locations.reduce((s, l) => s + l.lat, 0) / locations.length;
+            centerLng = locations.reduce((s, l) => s + l.lng, 0) / locations.length;
+        }
+        
+        const map = L.map('map').setView([centerLat, centerLng], 12);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+        
+        locations.forEach(loc => {
+            const marker = L.marker([loc.lat, loc.lng]).addTo(map);
+            marker.bindPopup('<div class="custom-popup"><h3>' + (loc.title || 'Ubicación') + '</h3><p>' + (loc.description || '') + '</p></div>');
+        });
+        
+        if (locations.length > 1) {
+            const bounds = L.latLngBounds(locations.map(l => [l.lat, l.lng]));
+            map.fitBounds(bounds, { padding: [20, 20] });
+        }
+        
+        setTimeout(() => map.invalidateSize(), 100);
+    <\/script>
+</body>
+</html>`;
+    },
+
+    /**
+     * Build table HTML
+     */
+    buildTableHtml(title, data) {
+        const headers = data.headers || [];
+        const rows = data.rows || [];
+        
+        let tableRows = rows.map(row => {
+            const cells = row.map(cell => {
+                if (typeof cell === 'object' && cell.url) {
+                    return `<td><a href="${this.escapeHtml(cell.url)}" target="_blank" rel="noopener">${this.escapeHtml(cell.text || 'Ver')}</a></td>`;
+                }
+                return `<td>${this.escapeHtml(String(cell))}</td>`;
+            }).join('');
+            return `<tr>${cells}</tr>`;
+        }).join('');
+
+        return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${this.escapeHtml(title)}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; background: #f9fafb; }
+        h1 { font-size: 18px; color: #1a5f2a; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th { background: #1a5f2a; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 13px; }
+        td { padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; }
+        tr:hover { background: #f0fdf4; }
+        a { color: #1a5f2a; text-decoration: none; font-weight: 500; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <h1>${this.escapeHtml(title)}</h1>
+    <table>
+        <thead><tr>${headers.map(h => `<th>${this.escapeHtml(h)}</th>`).join('')}</tr></thead>
+        <tbody>${tableRows}</tbody>
+    </table>
+</body>
+</html>`;
+    },
+
+    /**
+     * Build chart HTML
+     */
+    buildChartHtml(title, data) {
+        return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${this.escapeHtml(title)}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; background: #f9fafb; }
+        h1 { font-size: 18px; color: #1a5f2a; margin-bottom: 16px; }
+        .chart-container { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <h1>${this.escapeHtml(title)}</h1>
+    <div class="chart-container"><canvas id="chart"></canvas></div>
+    <script>
+        const ctx = document.getElementById('chart').getContext('2d');
+        new Chart(ctx, ${JSON.stringify(data)});
+    <\/script>
+</body>
+</html>`;
+    },
+
+    /**
+     * Escape HTML for attribute
+     */
+    escapeHtmlAttribute(str) {
+        return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    },
+
+    /**
      * Renderizar historial de chats en sidebar
      */
     renderChatHistory(chats, currentChatId) {
@@ -209,8 +374,8 @@ const UI = {
                 <path d="M2 12l10 5 10-5"/>
                </svg>`;
 
-        // Process markdown and make links open in new tab
-        let bodyHtml = this.renderMarkdown(message.content);
+        // Process content with render commands
+        let bodyHtml = this.processRenderCommands(message.content);
         
         div.innerHTML = `
             <div class="message-avatar">${avatarContent}</div>
@@ -229,11 +394,50 @@ const UI = {
             link.setAttribute('rel', 'noopener noreferrer');
         });
 
+        // Attach render button handlers
+        div.querySelectorAll('.render-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const renderId = btn.dataset.renderId;
+                this.showRenderPreview(renderId);
+            });
+        });
+
         this.elements.messagesList.appendChild(div);
         
         if (animate) {
             this.scrollToBottom();
         }
+    },
+
+    /**
+     * Process render commands in content
+     */
+    processRenderCommands(content) {
+        // Pattern: :::render-type{title="..."} followed by JSON and :::
+        const renderPattern = /:::render-(map|table|chart)\{title="([^"]+)"\}\s*\n([\s\S]*?)\n:::/g;
+        
+        let processedContent = content.replace(renderPattern, (match, type, title, jsonStr) => {
+            try {
+                const data = JSON.parse(jsonStr.trim());
+                const renderId = 'render_' + (++this.renderCounter);
+                
+                // Store render data
+                this.pendingRenders[renderId] = { type, title, data };
+                
+                // Return button placeholder
+                const icon = type === 'map' ? '🗺️' : type === 'table' ? '📊' : '📈';
+                const label = type === 'map' ? 'Ver Mapa' : type === 'table' ? 'Ver Tabla' : 'Ver Gráfico';
+                
+                return `<button class="render-btn render-btn-${type}" data-render-id="${renderId}">${icon} ${label}: ${this.escapeHtml(title)}</button>`;
+            } catch (e) {
+                console.error('Error parsing render command:', e);
+                return match; // Return original if parsing fails
+            }
+        });
+        
+        // Render remaining content as markdown
+        return this.renderMarkdown(processedContent);
     },
 
     /**
@@ -244,12 +448,21 @@ const UI = {
         if (messages.length > 0) {
             const lastMessage = messages[messages.length - 1];
             const bodyEl = lastMessage.querySelector('.message-body');
-            bodyEl.innerHTML = this.renderMarkdown(content);
+            bodyEl.innerHTML = this.processRenderCommands(content);
             
             // Make all links open in new tab
             bodyEl.querySelectorAll('a[href^="http"]').forEach(link => {
                 link.setAttribute('target', '_blank');
                 link.setAttribute('rel', 'noopener noreferrer');
+            });
+
+            // Attach render button handlers
+            bodyEl.querySelectorAll('.render-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const renderId = btn.dataset.renderId;
+                    this.showRenderPreview(renderId);
+                });
             });
             
             this.scrollToBottom();
