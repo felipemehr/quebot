@@ -6,6 +6,7 @@
 const App = {
     currentChatId: null,
     isProcessing: false,
+    lastVizData: null,
 
     /**
      * Inicializar aplicación
@@ -206,6 +207,56 @@ const App = {
     },
 
     /**
+     * Renderizar visualización (mapa, gráfico, etc)
+     */
+    renderVisualization(vizData, messageElement) {
+        if (!vizData || !messageElement) return;
+
+        const vizContainer = document.createElement('div');
+        vizContainer.className = 'viz-container';
+
+        if (vizData.type === 'map' && vizData.locations && vizData.locations.length > 0) {
+            // Create map container
+            const mapId = 'map-' + Date.now();
+            vizContainer.innerHTML = `
+                <div style="margin-top: 15px; background: var(--bg-secondary); border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color);">
+                    <div style="padding: 12px 15px; border-bottom: 1px solid var(--border-color); font-weight: 600;">
+                        🗺️ ${vizData.title || 'Mapa de Propiedades'}
+                    </div>
+                    <div id="${mapId}" class="viz-map"></div>
+                </div>
+            `;
+            messageElement.appendChild(vizContainer);
+
+            // Initialize map after DOM update
+            setTimeout(() => {
+                if (typeof Viz !== 'undefined' && typeof L !== 'undefined') {
+                    Viz.createMap(mapId, vizData.locations);
+                }
+            }, 100);
+        }
+
+        if (vizData.type === 'chart' && vizData.data) {
+            const chartId = 'chart-' + Date.now();
+            vizContainer.innerHTML = `
+                <div style="margin-top: 15px; background: var(--bg-secondary); border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color);">
+                    <div style="padding: 12px 15px; border-bottom: 1px solid var(--border-color); font-weight: 600;">
+                        📊 ${vizData.title || 'Gráfico'}
+                    </div>
+                    <div class="viz-chart"><canvas id="${chartId}"></canvas></div>
+                </div>
+            `;
+            messageElement.appendChild(vizContainer);
+
+            setTimeout(() => {
+                if (typeof Viz !== 'undefined' && typeof Chart !== 'undefined') {
+                    Viz.createChart(chartId, vizData.chartType || 'bar', vizData.data);
+                }
+            }, 100);
+        }
+    },
+
+    /**
      * Enviar mensaje
      */
     async sendMessage() {
@@ -213,6 +264,7 @@ const App = {
         if (!content || this.isProcessing) return;
 
         this.isProcessing = true;
+        this.lastVizData = null;
         UI.setInputEnabled(false);
 
         // Agregar mensaje del usuario
@@ -247,12 +299,13 @@ const App = {
         };
 
         let messageAppended = false;
+        let lastMessageElement = null;
 
         // Enviar a la API
         await API.sendMessage(
             messagesForApi,
             // onChunk
-            (chunk, fullContent) => {
+            (chunk, fullContent, vizData) => {
                 if (!messageAppended) {
                     UI.removeTypingIndicator();
                     UI.appendMessage({ ...assistantMessage, content: fullContent }, true);
@@ -261,13 +314,25 @@ const App = {
                     UI.updateLastAssistantMessage(fullContent);
                 }
                 assistantContent = fullContent;
+                if (vizData) this.lastVizData = vizData;
             },
             // onComplete
-            (finalContent) => {
+            (finalContent, vizData) => {
                 UI.removeTypingIndicator();
                 if (!messageAppended) {
                     UI.appendMessage({ ...assistantMessage, content: finalContent }, true);
                 }
+                
+                // Render visualization if available
+                if (vizData || this.lastVizData) {
+                    const messages = document.querySelectorAll('.message.assistant');
+                    const lastMsg = messages[messages.length - 1];
+                    if (lastMsg) {
+                        const contentEl = lastMsg.querySelector('.message-content');
+                        this.renderVisualization(vizData || this.lastVizData, contentEl);
+                    }
+                }
+
                 // Guardar mensaje del asistente
                 Storage.addMessage(this.currentChatId, {
                     role: 'assistant',
@@ -295,7 +360,6 @@ const App = {
         if (files.length === 0) return;
 
         // Por ahora solo mostrar los nombres
-        // La funcionalidad completa de archivos requiere más lógica
         Array.from(files).forEach(file => {
             UI.showToast(`Archivo adjuntado: ${file.name}`, 'success', 3000);
         });
