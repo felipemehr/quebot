@@ -7,6 +7,7 @@ const App = {
     currentChatId: null,
     isProcessing: false,
     lastVizData: null,
+    messageCount: 0,
 
     /**
      * Inicializar aplicación
@@ -35,6 +36,29 @@ const App = {
 
         // Verificar estado de la API
         this.checkApiStatus();
+
+        // Wait for Firebase to initialize
+        setTimeout(() => {
+            this.syncWithFirebase();
+        }, 2000);
+    },
+
+    /**
+     * Sync with Firebase if available
+     */
+    async syncWithFirebase() {
+        if (typeof queBotAuth === 'undefined' || !queBotAuth.initialized) {
+            console.log('Firebase not initialized, using localStorage only');
+            return;
+        }
+
+        // Try to load conversations from Firestore
+        const cloudConversations = await queBotAuth.loadConversations();
+        if (cloudConversations) {
+            console.log('Loaded conversations from Firebase');
+            // Merge with local storage (prefer cloud)
+            // For now, just log - full sync logic can be added later
+        }
     },
 
     /**
@@ -117,6 +141,16 @@ const App = {
                 UI.closePreview();
             }
         });
+
+        // User info click (for auth modal)
+        const userInfo = document.getElementById('userInfo');
+        if (userInfo) {
+            userInfo.addEventListener('click', () => {
+                if (typeof queBotAuth !== 'undefined') {
+                    queBotAuth.showAuthModal();
+                }
+            });
+        }
     },
 
     /**
@@ -139,6 +173,7 @@ const App = {
     newChat() {
         const chat = Storage.createChat();
         this.currentChatId = chat.id;
+        this.messageCount = 0;
         this.renderCurrentChat();
         this.renderChatHistory();
         UI.elements.messageInput.focus();
@@ -157,6 +192,10 @@ const App = {
         Storage.setCurrentChat(chatId);
         this.renderCurrentChat();
         this.renderChatHistory();
+        
+        // Update message count for this chat
+        const chat = Storage.getChat(chatId);
+        this.messageCount = chat ? Math.floor(chat.messages.length / 2) : 0;
         
         // Cerrar sidebar en móvil
         if (window.innerWidth <= 768) {
@@ -265,7 +304,15 @@ const App = {
 
         this.isProcessing = true;
         this.lastVizData = null;
+        this.messageCount++;
         UI.setInputEnabled(false);
+
+        // Increment message count in Firebase auth
+        if (typeof queBotAuth !== 'undefined') {
+            queBotAuth.incrementMessageCount();
+            // Try to extract user info from message
+            queBotAuth.processRegistrationFromChat(content);
+        }
 
         // Agregar mensaje del usuario
         const userMessage = {
@@ -338,6 +385,10 @@ const App = {
                     role: 'assistant',
                     content: finalContent
                 });
+
+                // Save to Firebase if authenticated
+                this.saveToFirebase();
+
                 this.isProcessing = false;
                 UI.setInputEnabled(true);
                 UI.elements.messageInput.focus();
@@ -350,6 +401,22 @@ const App = {
                 UI.setInputEnabled(true);
             }
         );
+    },
+
+    /**
+     * Save current chat to Firebase
+     */
+    async saveToFirebase() {
+        if (typeof queBotAuth === 'undefined' || !queBotAuth.initialized) return;
+        
+        const chat = Storage.getChat(this.currentChatId);
+        if (chat) {
+            await queBotAuth.saveConversation(
+                this.currentChatId,
+                chat.messages,
+                chat.title
+            );
+        }
     },
 
     /**

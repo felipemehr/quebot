@@ -9,11 +9,17 @@ const API = {
     /**
      * Enviar mensaje a Claude y obtener respuesta
      */
-    async sendMessage(messages, onChunk, onComplete, onError) {
+    async sendMessage(messages, onChunk, onComplete, onError, userContext = '') {
         try {
             // Get the last message content for the API
             const lastMessage = messages[messages.length - 1];
             const history = messages.slice(0, -1);
+
+            // Get user context from Firebase auth if available
+            let context = userContext;
+            if (typeof queBotAuth !== 'undefined' && queBotAuth.initialized) {
+                context = queBotAuth.getUserContext();
+            }
 
             const response = await fetch(this.endpoint, {
                 method: 'POST',
@@ -25,7 +31,8 @@ const API = {
                     history: history.map(msg => ({
                         role: msg.role,
                         content: msg.content
-                    }))
+                    })),
+                    userContext: context
                 })
             });
 

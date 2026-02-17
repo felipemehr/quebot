@@ -1,10 +1,8 @@
 <?php
-// Suppress errors to prevent HTML in JSON response
-error_reporting(0);
-ini_set('display_errors', 0);
-set_time_limit(120);
-
-require_once 'config.php';
+/**
+ * QueBot - Chat API Endpoint
+ * Handles chat requests to Claude API with web search capability
+ */
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -15,165 +13,183 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['status'])) {
-    echo json_encode(['configured' => !empty(ANTHROPIC_API_KEY), 'version' => '2.2', 'features' => ['search', 'visualization']]);
-    exit;
-}
+require_once 'config.php';
+require_once 'search.php';
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['error' => 'Method not allowed']);
-    exit;
-}
-
-try {
-    $input = json_decode(file_get_contents('php://input'), true);
-
-    if (!isset($input['message']) || empty(trim($input['message']))) {
-        http_response_code(400);
-        echo json_encode(['error' => 'Message is required']);
-        exit;
-    }
-
-    $userMessage = trim($input['message']);
-    $conversationHistory = $input['history'] ?? [];
-
-    // Expanded search detection - be more aggressive about searching
-    $searchKeywords = [
-        // Verbos de búsqueda
-        'busca', 'buscar', 'encuentra', 'encontrar', 'muestra', 'mostrar', 'dame', 'quiero ver',
-        // Propiedades
-        'parcela', 'parcelas', 'terreno', 'terrenos', 'propiedad', 'propiedades', 'casa', 'casas',
-        'departamento', 'depto', 'arriendo', 'venta', 'inmobiliario',
-        // Información actual
-        'noticias', 'precio', 'dolar', 'dólar', 'clima', 'tiempo', 'cotización',
-        // Lugares específicos
-        'melipeuco', 'santiago', 'chile',
-        // Comparaciones
-        'mejor', 'mejores', 'comparar', 'comparación', 'top', 'ranking',
-        // Links
-        'link', 'links', 'url', 'página', 'sitio', 'web',
-        // Características
-        'agua', 'luz', 'electricidad', 'pozo', 'vertiente', 'estero',
-        // Precios
-        'millones', 'uf', 'precio', 'costo', 'valor', 'barato', 'económico'
-    ];
-    
-    $shouldSearch = false;
-    $lowerMessage = strtolower($userMessage);
-    foreach ($searchKeywords as $keyword) {
-        if (stripos($lowerMessage, $keyword) !== false) {
-            $shouldSearch = true;
-            break;
-        }
-    }
-
-    // Perform search
-    $searchResults = [];
-    $searchContext = '';
-    
-    if ($shouldSearch) {
-        try {
-            require_once 'search.php';
-            $searchResults = performSearch($userMessage, 10); // Get more results
-            
-            if (!empty($searchResults)) {
-                $searchContext = "\n\n=== RESULTADOS DE BÚSQUEDA WEB (DATOS REALES) ===\n";
-                $searchContext .= "Fecha de búsqueda: " . date('Y-m-d H:i') . "\n\n";
-                foreach ($searchResults as $i => $result) {
-                    $searchContext .= "RESULTADO " . ($i + 1) . ":\n";
-                    $searchContext .= "  Título: {$result['title']}\n";
-                    $searchContext .= "  URL: {$result['url']}\n";
-                    $searchContext .= "  Descripción: {$result['snippet']}\n\n";
-                }
-                $searchContext .= "=== FIN DE RESULTADOS ===\n\n";
-                $searchContext .= "INSTRUCCIONES: Usa ÚNICAMENTE las URLs listadas arriba. NO inventes links.\n";
-                $searchContext .= "Si el usuario pide 'los 3 mejores', selecciona los más relevantes de estos resultados.\n";
-            } else {
-                $searchContext = "\n\n[BÚSQUEDA REALIZADA - SIN RESULTADOS]\n";
-                $searchContext .= "La búsqueda no encontró resultados relevantes. ";
-                $searchContext .= "Informa al usuario y sugiere términos alternativos.\n";
-            }
-        } catch (Exception $e) {
-            $searchContext = "\n\n[ERROR EN BÚSQUEDA: " . $e->getMessage() . "]\n";
-            $searchContext .= "Informa al usuario que hubo un problema técnico con la búsqueda.\n";
-        }
-    }
-
-    // Build messages array
-    $messages = [];
-    foreach ($conversationHistory as $msg) {
-        if (isset($msg['role']) && isset($msg['content'])) {
-            $messages[] = ['role' => $msg['role'], 'content' => $msg['content']];
-        }
-    }
-
-    // Add current message with search context
-    $finalMessage = $userMessage;
-    if (!empty($searchContext)) {
-        $finalMessage .= $searchContext;
-    }
-    $messages[] = ['role' => 'user', 'content' => $finalMessage];
-
-    // Prepare API request
-    $data = [
-        'model' => 'claude-sonnet-4-20250514',
-        'max_tokens' => MAX_TOKENS,
-        'system' => SYSTEM_PROMPT,
-        'messages' => $messages
-    ];
-
-    $ch = curl_init('https://api.anthropic.com/v1/messages');
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => [
-            'Content-Type: application/json',
-            'x-api-key: ' . ANTHROPIC_API_KEY,
-            'anthropic-version: 2023-06-01'
-        ],
-        CURLOPT_POSTFIELDS => json_encode($data),
-        CURLOPT_TIMEOUT => 90
-    ]);
-
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $error = curl_error($ch);
-    curl_close($ch);
-
-    if ($error) {
-        http_response_code(500);
-        echo json_encode(['error' => 'API request failed: ' . $error]);
-        exit;
-    }
-
-    $result = json_decode($response, true);
-
-    if ($httpCode !== 200) {
-        http_response_code($httpCode);
-        echo json_encode(['error' => $result['error']['message'] ?? 'API error']);
-        exit;
-    }
-
-    // Extract response text
-    $responseText = '';
-    if (isset($result['content']) && is_array($result['content'])) {
-        foreach ($result['content'] as $block) {
-            if ($block['type'] === 'text') {
-                $responseText .= $block['text'];
-            }
-        }
-    }
-
+// Status check
+if (isset($_GET['status'])) {
     echo json_encode([
-        'response' => $responseText,
-        'visualization' => null,
-        'searchPerformed' => $shouldSearch,
-        'searchResultsCount' => count($searchResults),
-        'usage' => $result['usage'] ?? null
+        'configured' => isApiConfigured(),
+        'model' => CLAUDE_MODEL
     ]);
-
-} catch (Exception $e) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Server error: ' . $e->getMessage()]);
+    exit;
 }
+
+// Get POST data
+$input = json_decode(file_get_contents('php://input'), true);
+
+if (!$input || !isset($input['message'])) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Mensaje requerido']);
+    exit;
+}
+
+$userMessage = trim($input['message']);
+$history = isset($input['history']) ? $input['history'] : [];
+$userContext = isset($input['userContext']) ? trim($input['userContext']) : '';
+
+if (empty($userMessage)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Mensaje vacío']);
+    exit;
+}
+
+if (!isApiConfigured()) {
+    http_response_code(500);
+    echo json_encode(['error' => 'API key no configurada']);
+    exit;
+}
+
+// Check if message needs web search
+$searchResults = null;
+$searchKeywords = [
+    'busca', 'buscar', 'encuentra', 'encontrar', 'search',
+    'parcela', 'parcelas', 'terreno', 'terrenos', 'propiedad', 'propiedades',
+    'casa', 'casas', 'departamento', 'departamentos', 'arriendo', 'venta',
+    'precio', 'precios', 'costo', 'costos', 'valor',
+    'noticias', 'news', 'actualidad', 'hoy',
+    'dólar', 'dolar', 'uf', 'utm', 'moneda', 'cambio',
+    'clima', 'tiempo', 'weather',
+    'restaurante', 'restaurantes', 'hotel', 'hoteles',
+    'vuelo', 'vuelos', 'pasaje', 'pasajes',
+    'donde', 'dónde', 'ubicación', 'dirección',
+    'teléfono', 'contacto', 'horario',
+    'información sobre', 'datos de', 'info de',
+    'sitio', 'página', 'web', 'link', 'url',
+    'mejor', 'mejores', 'top', 'ranking',
+    'comparar', 'comparación', 'versus', 'vs',
+    'cuánto', 'cuanto', 'cuál', 'cual', 'quién', 'quien',
+    'cómo llegar', 'como llegar', 'ruta', 'mapa',
+    'empresa', 'empresas', 'compañía', 'negocio',
+    'producto', 'productos', 'servicio', 'servicios',
+    'oferta', 'ofertas', 'descuento', 'promoción',
+    'evento', 'eventos', 'concierto', 'show',
+    'curso', 'cursos', 'carrera', 'universidad',
+    'trabajo', 'empleo', 'vacante', 'sueldo',
+    'ley', 'legal', 'trámite', 'documento',
+    'melipeuco', 'temuco', 'santiago', 'valparaíso', 'chile',
+    'inmobiliaria', 'corredora', 'corredor'
+];
+
+$messageLower = mb_strtolower($userMessage, 'UTF-8');
+$shouldSearch = false;
+foreach ($searchKeywords as $keyword) {
+    if (strpos($messageLower, $keyword) !== false) {
+        $shouldSearch = true;
+        break;
+    }
+}
+
+// Perform web search if needed
+if ($shouldSearch) {
+    $searchResults = performWebSearch($userMessage);
+}
+
+// Build messages array
+$messages = [];
+
+// Add history
+foreach ($history as $msg) {
+    if (isset($msg['role']) && isset($msg['content'])) {
+        $messages[] = [
+            'role' => $msg['role'],
+            'content' => $msg['content']
+        ];
+    }
+}
+
+// Build user message with search results and context
+$fullUserMessage = $userMessage;
+
+if ($searchResults && !empty($searchResults['results'])) {
+    $fullUserMessage .= "\n\n---\nRESULTADOS DE BÚSQUEDA WEB (usa estos links REALES en tu respuesta):\n";
+    foreach ($searchResults['results'] as $i => $result) {
+        $num = $i + 1;
+        $fullUserMessage .= "\n{$num}. {$result['title']}\n";
+        $fullUserMessage .= "   URL: {$result['url']}\n";
+        if (!empty($result['snippet'])) {
+            $fullUserMessage .= "   Descripción: {$result['snippet']}\n";
+        }
+    }
+    $fullUserMessage .= "\n---\nIMPORTANTE: Usa SOLO las URLs exactas de arriba. NO inventes links.";
+}
+
+$messages[] = [
+    'role' => 'user',
+    'content' => $fullUserMessage
+];
+
+// Build system prompt with user context
+$systemPrompt = SYSTEM_PROMPT;
+if (!empty($userContext)) {
+    $systemPrompt .= "\n\n## CONTEXTO DEL USUARIO ACTUAL\n" . $userContext;
+}
+
+// Call Claude API
+$ch = curl_init();
+
+curl_setopt_array($ch, [
+    CURLOPT_URL => 'https://api.anthropic.com/v1/messages',
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_POST => true,
+    CURLOPT_HTTPHEADER => [
+        'Content-Type: application/json',
+        'x-api-key: ' . ANTHROPIC_API_KEY,
+        'anthropic-version: 2023-06-01'
+    ],
+    CURLOPT_POSTFIELDS => json_encode([
+        'model' => CLAUDE_MODEL,
+        'max_tokens' => MAX_TOKENS,
+        'system' => $systemPrompt,
+        'messages' => $messages
+    ]),
+    CURLOPT_TIMEOUT => 120
+]);
+
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$error = curl_error($ch);
+curl_close($ch);
+
+if ($error) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Error de conexión: ' . $error]);
+    exit;
+}
+
+if ($httpCode !== 200) {
+    $errorData = json_decode($response, true);
+    $errorMessage = isset($errorData['error']['message']) 
+        ? $errorData['error']['message'] 
+        : 'Error del servidor (HTTP ' . $httpCode . ')';
+    http_response_code($httpCode);
+    echo json_encode(['error' => $errorMessage]);
+    exit;
+}
+
+$data = json_decode($response, true);
+
+if (!isset($data['content'][0]['text'])) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Respuesta inválida de Claude']);
+    exit;
+}
+
+$assistantResponse = $data['content'][0]['text'];
+
+// Return response
+echo json_encode([
+    'response' => $assistantResponse,
+    'model' => CLAUDE_MODEL,
+    'searched' => $shouldSearch
+]);
