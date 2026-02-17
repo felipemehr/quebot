@@ -192,7 +192,7 @@ const UI = {
     /**
      * Agregar mensaje al DOM
      */
-    appendMessage(message, animate = false) {
+    async appendMessage(message, animate = false) {
         this.elements.welcomeScreen.classList.add('hidden');
 
         const div = document.createElement('div');
@@ -209,6 +209,12 @@ const UI = {
                 <path d="M2 12l10 5 10-5"/>
                </svg>`;
 
+        // Process render commands in assistant messages
+        let content = message.content;
+        if (message.role === 'assistant' && typeof Renders !== 'undefined') {
+            content = await Renders.processMessage(content, div);
+        }
+
         div.innerHTML = `
             <div class="message-avatar">${avatarContent}</div>
             <div class="message-content">
@@ -216,7 +222,7 @@ const UI = {
                     <span class="message-author">${authorName}</span>
                     <span class="message-time">${time}</span>
                 </div>
-                <div class="message-body">${this.renderMarkdown(message.content)}</div>
+                <div class="message-body">${this.renderMarkdown(content)}</div>
             </div>
         `;
 
@@ -230,12 +236,19 @@ const UI = {
     /**
      * Actualizar contenido del último mensaje del asistente
      */
-    updateLastAssistantMessage(content) {
+    async updateLastAssistantMessage(content) {
         const messages = this.elements.messagesList.querySelectorAll('.message.assistant');
         if (messages.length > 0) {
             const lastMessage = messages[messages.length - 1];
             const bodyEl = lastMessage.querySelector('.message-body');
-            bodyEl.innerHTML = this.renderMarkdown(content);
+            
+            // Process render commands
+            let processedContent = content;
+            if (typeof Renders !== 'undefined') {
+                processedContent = await Renders.processMessage(content, lastMessage);
+            }
+            
+            bodyEl.innerHTML = this.renderMarkdown(processedContent);
             this.scrollToBottom();
         }
     },
