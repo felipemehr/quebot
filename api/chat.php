@@ -3,11 +3,21 @@ require_once 'config.php';
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
+}
+
+// Handle status check (GET request)
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['status'])) {
+    echo json_encode([
+        'configured' => defined('ANTHROPIC_API_KEY') && !empty(ANTHROPIC_API_KEY) && ANTHROPIC_API_KEY !== 'your-api-key-here',
+        'version' => '2.0',
+        'features' => ['search', 'visualization']
+    ]);
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
