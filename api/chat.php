@@ -2,7 +2,7 @@
 // Suppress errors to prevent HTML in JSON response
 error_reporting(0);
 ini_set('display_errors', 0);
-set_time_limit(120); // Allow up to 2 minutes
+set_time_limit(120);
 
 require_once 'config.php';
 
@@ -15,9 +15,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }
 
-// Handle status check
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['status'])) {
-    echo json_encode(['configured' => !empty(ANTHROPIC_API_KEY), 'version' => '2.1', 'features' => ['search', 'visualization']]);
+    echo json_encode(['configured' => !empty(ANTHROPIC_API_KEY), 'version' => '2.2', 'features' => ['search', 'visualization']]);
     exit;
 }
 
@@ -39,37 +38,65 @@ try {
     $userMessage = trim($input['message']);
     $conversationHistory = $input['history'] ?? [];
 
-    // Check if this looks like a search query
-    $searchKeywords = ['busca', 'buscar', 'encuentra', 'encontrar', 'parcelas', 'propiedades', 'terrenos', 'casas', 'noticias', 'precio', 'dolar', 'clima'];
+    // Expanded search detection - be more aggressive about searching
+    $searchKeywords = [
+        // Verbos de búsqueda
+        'busca', 'buscar', 'encuentra', 'encontrar', 'muestra', 'mostrar', 'dame', 'quiero ver',
+        // Propiedades
+        'parcela', 'parcelas', 'terreno', 'terrenos', 'propiedad', 'propiedades', 'casa', 'casas',
+        'departamento', 'depto', 'arriendo', 'venta', 'inmobiliario',
+        // Información actual
+        'noticias', 'precio', 'dolar', 'dólar', 'clima', 'tiempo', 'cotización',
+        // Lugares específicos
+        'melipeuco', 'santiago', 'chile',
+        // Comparaciones
+        'mejor', 'mejores', 'comparar', 'comparación', 'top', 'ranking',
+        // Links
+        'link', 'links', 'url', 'página', 'sitio', 'web',
+        // Características
+        'agua', 'luz', 'electricidad', 'pozo', 'vertiente', 'estero',
+        // Precios
+        'millones', 'uf', 'precio', 'costo', 'valor', 'barato', 'económico'
+    ];
+    
     $shouldSearch = false;
+    $lowerMessage = strtolower($userMessage);
     foreach ($searchKeywords as $keyword) {
-        if (stripos($userMessage, $keyword) !== false) {
+        if (stripos($lowerMessage, $keyword) !== false) {
             $shouldSearch = true;
             break;
         }
     }
 
-    // Perform search with error handling
+    // Perform search
     $searchResults = [];
     $searchContext = '';
-    $searchError = '';
     
     if ($shouldSearch) {
         try {
             require_once 'search.php';
-            $searchResults = performSearch($userMessage, 6);
+            $searchResults = performSearch($userMessage, 10); // Get more results
             
             if (!empty($searchResults)) {
-                $searchContext = "\n\n=== RESULTADOS DE BUSQUEDA WEB ===\n";
+                $searchContext = "\n\n=== RESULTADOS DE BÚSQUEDA WEB (DATOS REALES) ===\n";
+                $searchContext .= "Fecha de búsqueda: " . date('Y-m-d H:i') . "\n\n";
                 foreach ($searchResults as $i => $result) {
-                    $searchContext .= ($i + 1) . ". {$result['title']}\n";
-                    $searchContext .= "   URL: {$result['url']}\n";
-                    $searchContext .= "   {$result['snippet']}\n\n";
+                    $searchContext .= "RESULTADO " . ($i + 1) . ":\n";
+                    $searchContext .= "  Título: {$result['title']}\n";
+                    $searchContext .= "  URL: {$result['url']}\n";
+                    $searchContext .= "  Descripción: {$result['snippet']}\n\n";
                 }
-                $searchContext .= "=== FIN ===\nIMPORTANTE: Usa SOLO estos URLs reales.\n";
+                $searchContext .= "=== FIN DE RESULTADOS ===\n\n";
+                $searchContext .= "INSTRUCCIONES: Usa ÚNICAMENTE las URLs listadas arriba. NO inventes links.\n";
+                $searchContext .= "Si el usuario pide 'los 3 mejores', selecciona los más relevantes de estos resultados.\n";
+            } else {
+                $searchContext = "\n\n[BÚSQUEDA REALIZADA - SIN RESULTADOS]\n";
+                $searchContext .= "La búsqueda no encontró resultados relevantes. ";
+                $searchContext .= "Informa al usuario y sugiere términos alternativos.\n";
             }
         } catch (Exception $e) {
-            $searchError = $e->getMessage();
+            $searchContext = "\n\n[ERROR EN BÚSQUEDA: " . $e->getMessage() . "]\n";
+            $searchContext .= "Informa al usuario que hubo un problema técnico con la búsqueda.\n";
         }
     }
 
@@ -81,12 +108,10 @@ try {
         }
     }
 
-    // Add current message
+    // Add current message with search context
     $finalMessage = $userMessage;
     if (!empty($searchContext)) {
         $finalMessage .= $searchContext;
-    } elseif ($shouldSearch && empty($searchResults)) {
-        $finalMessage .= "\n\n(La busqueda web no arrojó resultados. Responde con tu conocimiento general.)";
     }
     $messages[] = ['role' => 'user', 'content' => $finalMessage];
 
@@ -143,7 +168,8 @@ try {
     echo json_encode([
         'response' => $responseText,
         'visualization' => null,
-        'searchResults' => $searchResults,
+        'searchPerformed' => $shouldSearch,
+        'searchResultsCount' => count($searchResults),
         'usage' => $result['usage'] ?? null
     ]);
 
