@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QueBot - Asistente Inteligente</title>
     <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/auth.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -78,9 +79,9 @@
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                     </svg>
                 </button>
-                <div class="user-info">
-                    <div class="user-avatar">F</div>
-                    <span class="user-name">Felipe</span>
+                <div class="user-info" id="userInfo" title="Clic para ver opciones de cuenta">
+                    <div class="user-avatar">?</div>
+                    <span class="user-name">Invitado</span>
                 </div>
             </div>
         </aside>
@@ -116,8 +117,8 @@
                                 <path d="M2 12l10 5 10-5"/>
                             </svg>
                         </div>
-                        <h2>¿En qué puedo ayudarte hoy?</h2>
-                        <p>Soy QueBot, tu asistente inteligente con búsqueda web. Puedo buscar propiedades, noticias y más.</p>
+                        <h2>¡Hola! Soy QueBot 👋</h2>
+                        <p>Tu asistente inteligente con búsqueda web. Puedo buscar propiedades, noticias, información y mucho más.</p>
                         <div class="suggestion-cards">
                             <button class="suggestion-card" data-prompt="Busca parcelas en Melipeuco">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -214,10 +215,17 @@
     <!-- Toast notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-analytics-compat.js"></script>
+    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script src="js/firebase.js"></script>
     <script src="js/storage.js"></script>
     <script src="js/api.js"></script>
     <script src="js/ui.js"></script>
