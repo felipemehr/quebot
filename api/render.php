@@ -23,13 +23,12 @@ function cleanOldRenders($dir) {
     $files = glob($dir . '/*.html');
     $now = time();
     foreach ($files as $file) {
-        if ($now - filemtime($file) > 86400) { // 24 hours
+        if ($now - filemtime($file) > 86400) {
             unlink($file);
         }
     }
 }
 
-// Generate unique ID
 function generateRenderId() {
     return 'r_' . bin2hex(random_bytes(8));
 }
@@ -69,16 +68,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
     
-    // Clean old renders periodically
     if (rand(1, 10) === 1) {
         cleanOldRenders($renderDir);
     }
     
     $id = generateRenderId();
     $type = preg_replace('/[^a-zA-Z0-9]/', '', $input['type']);
-    $title = isset($input['title']) ? substr($input['title'], 0, 100) : 'Visualizacion';
+    $title = isset($input['title']) ? substr($input['title'], 0, 100) : 'Visualización';
     
-    // Wrap HTML in full document with styling
     $fullHtml = '<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -90,46 +87,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
+        html, body { 
+            width: 100%;
+            height: 100%;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: #f5f5f5;
-            min-height: 100vh;
         }
-        .render-container {
-            width: 100%;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
+        #map { 
+            width: 100% !important; 
+            height: 100% !important; 
+            min-height: 400px;
         }
-        .render-header {
-            padding: 16px 20px;
-            background: white;
-            border-bottom: 1px solid #e5e7eb;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+        #chart-container { 
+            width: 100%; 
+            height: 100%; 
+            padding: 20px; 
         }
-        .render-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #111827;
-        }
-        .render-badge {
-            font-size: 0.75rem;
-            padding: 4px 10px;
-            background: #2d5a3d;
-            color: white;
-            border-radius: 12px;
-        }
-        .render-content {
-            flex: 1;
-            overflow: auto;
-        }
-        #map { width: 100%; height: 100%; }
-        #chart-container { width: 100%; height: 100%; padding: 20px; }
         canvas { max-height: 100%; }
         
         /* Table styles */
+        .table-container { width: 100%; height: 100%; overflow: auto; }
         .data-table {
             width: 100%;
             border-collapse: collapse;
@@ -163,10 +140,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         /* Map popup styles */
-        .leaflet-popup-content { min-width: 200px; }
+        .leaflet-popup-content { min-width: 220px; max-width: 300px; }
         .popup-title { font-weight: bold; color: #2d5a3d; margin-bottom: 8px; font-size: 14px; }
         .popup-price { font-size: 18px; font-weight: bold; color: #059669; margin-bottom: 6px; }
-        .popup-size { color: #666; margin-bottom: 8px; }
+        .popup-size { color: #666; margin-bottom: 8px; font-size: 13px; }
         .popup-desc { font-size: 12px; color: #444; margin-bottom: 10px; line-height: 1.4; }
         .popup-link { 
             display: inline-block; 
@@ -188,11 +165,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 13px;
             line-height: 1.8;
         }
-        .legend h4 { margin-bottom: 8px; color: #333; }
+        .legend h4 { margin-bottom: 8px; color: #333; font-size: 14px; }
         .legend-item { display: flex; align-items: center; gap: 8px; }
         .legend-color {
-            width: 12px;
-            height: 12px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
             border: 2px solid white;
             box-shadow: 0 1px 3px rgba(0,0,0,0.3);
@@ -200,15 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </style>
 </head>
 <body>
-    <div class="render-container">
-        <div class="render-header">
-            <span class="render-title">' . htmlspecialchars($title) . '</span>
-            <span class="render-badge">' . htmlspecialchars($type) . '</span>
-        </div>
-        <div class="render-content">
-            ' . $input['html'] . '
-        </div>
-    </div>
+' . $input['html'] . '
 </body>
 </html>';
     
