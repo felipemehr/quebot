@@ -7,17 +7,22 @@ const API = {
     endpoint: 'api/chat.php',
     
     /**
-     * Enviar mensaje a Claude y obtener respuesta con streaming
+     * Enviar mensaje a Claude y obtener respuesta
      */
     async sendMessage(messages, onChunk, onComplete, onError) {
         try {
+            // Get the last message content for the API
+            const lastMessage = messages[messages.length - 1];
+            const history = messages.slice(0, -1);
+
             const response = await fetch(this.endpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    messages: messages.map(msg => ({
+                    message: lastMessage.content,
+                    history: history.map(msg => ({
                         role: msg.role,
                         content: msg.content
                     }))
@@ -29,59 +34,22 @@ const API = {
                 throw new Error(error.error || 'Error en la solicitud');
             }
 
-            // Check if streaming
-            const contentType = response.headers.get('content-type');
+            const data = await response.json();
             
-            if (contentType && contentType.includes('text/event-stream')) {
-                // Handle SSE streaming
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let fullContent = '';
-                let buffer = '';
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop(); // Keep incomplete line in buffer
-
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = line.slice(6);
-                            if (data === '[DONE]') {
-                                onComplete(fullContent);
-                                return;
-                            }
-                            try {
-                                const parsed = JSON.parse(data);
-                                if (parsed.content) {
-                                    fullContent += parsed.content;
-                                    onChunk(parsed.content, fullContent);
-                                }
-                                if (parsed.error) {
-                                    throw new Error(parsed.error);
-                                }
-                            } catch (e) {
-                                // Ignore JSON parse errors for incomplete data
-                                if (e.message !== 'Unexpected end of JSON input') {
-                                    console.error('Parse error:', e);
-                                }
-                            }
-                        }
-                    }
-                }
-                onComplete(fullContent);
-            } else {
-                // Handle regular JSON response
-                const data = await response.json();
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                onChunk(data.content, data.content);
-                onComplete(data.content);
+            if (data.error) {
+                throw new Error(data.error);
             }
+
+            // Handle response with optional visualization
+            const textContent = data.response || data.content || '';
+            const vizData = data.visualization || null;
+
+            // Call chunk callback with full content
+            onChunk(textContent, textContent, vizData);
+            
+            // Call complete callback with content and viz data
+            onComplete(textContent, vizData);
+
         } catch (error) {
             console.error('API Error:', error);
             onError(error.message || 'Error de conexión');
