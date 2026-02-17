@@ -12,12 +12,8 @@ function searchWeb($query, $maxResults = 5) {
         CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        CURLOPT_TIMEOUT => 15,
-        CURLOPT_HTTPHEADER => [
-            'Accept: text/html,application/xhtml+xml',
-            'Accept-Language: es-CL,es;q=0.9,en;q=0.8'
-        ]
+        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        CURLOPT_TIMEOUT => 15
     ]);
     
     $html = curl_exec($ch);
@@ -30,25 +26,25 @@ function searchWeb($query, $maxResults = 5) {
     
     $results = [];
     
-    // Parse DuckDuckGo results - match result links
-    preg_match_all('/class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]*(?:<[^>]+>[^<]*)*)</i', $html, $titleMatches, PREG_SET_ORDER);
+    // Pattern: <a rel="nofollow" class="result__a" href="URL">TITLE</a>
+    preg_match_all('/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)</i', $html, $matches, PREG_SET_ORDER);
     
-    // Match snippets
-    preg_match_all('/class="result__snippet"[^>]*>([^<]*(?:<[^>]+>[^<]*)*)</i', $html, $snippetMatches);
+    // Get snippets separately
+    preg_match_all('/class="result__snippet"[^>]*>([^<]+)</i', $html, $snippetMatches);
     
-    foreach (array_slice($titleMatches, 0, $maxResults) as $i => $match) {
-        $rawUrl = $match[1];
-        $title = strip_tags($match[2]);
-        $snippet = isset($snippetMatches[1][$i]) ? strip_tags($snippetMatches[1][$i]) : '';
+    foreach (array_slice($matches, 0, $maxResults) as $i => $match) {
+        $rawUrl = html_entity_decode($match[1]);
+        $title = trim($match[2]);
+        $snippet = isset($snippetMatches[1][$i]) ? trim($snippetMatches[1][$i]) : '';
         
         // Extract real URL from DuckDuckGo redirect
         $realUrl = extractRealUrl($rawUrl);
         
         if (!empty($title) && !empty($realUrl)) {
             $results[] = [
-                'title' => html_entity_decode(trim($title), ENT_QUOTES, 'UTF-8'),
+                'title' => html_entity_decode($title, ENT_QUOTES, 'UTF-8'),
                 'url' => $realUrl,
-                'snippet' => html_entity_decode(trim($snippet), ENT_QUOTES, 'UTF-8')
+                'snippet' => html_entity_decode($snippet, ENT_QUOTES, 'UTF-8')
             ];
         }
     }
@@ -56,27 +52,14 @@ function searchWeb($query, $maxResults = 5) {
     return ['results' => $results, 'query' => $query];
 }
 
-/**
- * Extract real URL from DuckDuckGo redirect URL
- */
 function extractRealUrl($ddgUrl) {
-    // DuckDuckGo URLs: //duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&rut=...
+    // Extract from: //duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&rut=...
     if (preg_match('/uddg=([^&]+)/', $ddgUrl, $match)) {
         return urldecode($match[1]);
     }
-    
-    // Clean up URL
-    $url = ltrim($ddgUrl, '/');
-    if (strpos($url, 'http') !== 0) {
-        $url = 'https://' . $url;
-    }
-    
-    return $url;
+    return ltrim($ddgUrl, '/');
 }
 
-/**
- * Detect if message needs web search
- */
 function needsWebSearch($message) {
     $patterns = [
         '/\b(busca|buscar|búsqueda|search|googlea|investiga)\b/i',
@@ -88,26 +71,18 @@ function needsWebSearch($message) {
         '/\b(dólar|uf|euro|bitcoin)\b/i'
     ];
     
-    foreach ($patterns as $pattern) {
-        if (preg_match($pattern, $message)) {
-            return true;
-        }
+    foreach ($patterns as $p) {
+        if (preg_match($p, $message)) return true;
     }
     return false;
 }
 
-/**
- * Extract search query from message
- */
 function extractSearchQuery($message) {
     $cleaned = preg_replace('/^(busca|buscar|búsqueda de|search|googlea|investiga)\s*/i', '', $message);
     $cleaned = preg_replace('/^(qué es|quién es|dime sobre)\s*/i', '', $cleaned);
     return trim($cleaned, '?!. ') ?: $message;
 }
 
-/**
- * Format search results for Claude
- */
 function formatSearchResultsForPrompt($searchData) {
     if (empty($searchData['results'])) {
         return "No encontré resultados para: {$searchData['query']}";
