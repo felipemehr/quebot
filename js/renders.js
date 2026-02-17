@@ -13,7 +13,19 @@ const Renders = {
                 body: JSON.stringify({ type, title, html })
             });
             
-            if (!response.ok) throw new Error('Failed to save render');
+            if (!response.ok) {
+                console.error('Render save failed:', response.status);
+                return null;
+            }
+            
+            // Check content type before parsing JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('Render API returned non-JSON:', text.substring(0, 100));
+                return null;
+            }
+            
             return await response.json();
         } catch (error) {
             console.error('Error saving render:', error);
@@ -195,6 +207,7 @@ const Renders = {
 
     // Helper: Escape HTML
     escapeHtml(str) {
+        if (!str) return '';
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
