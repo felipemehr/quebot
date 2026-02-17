@@ -1,98 +1,78 @@
 /**
  * QueBot - API Module
- * Funciones para comunicación con el backend
+ * Comunicación con el backend PHP para Claude API
  */
 
 const API = {
-    baseUrl: 'api/',
-
+    endpoint: 'api/chat.php',
+    
     /**
-     * Enviar mensaje al chat
-     * @param {Array} messages - Array de mensajes del historial
-     * @param {Function} onChunk - Callback para chunks (no usado, pero mantenemos compatibilidad)
-     * @param {Function} onComplete - Callback cuando termina
-     * @param {Function} onError - Callback para errores
+     * Enviar mensaje a Claude y obtener respuesta
      */
-    async sendMessage(messages, onChunk, onComplete, onError) {
+    async sendMessage(messages, onChunk, onComplete, onError, userContext = '') {
         try {
-            // Get user context if available
-            const userContext = typeof queBotAuth !== 'undefined' ? queBotAuth.getUserContext() : '';
-            
-            // Get last user message
-            const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-            if (!lastUserMessage) {
-                if (onError) onError('No hay mensaje para enviar');
-                return;
+            // Get the last message content for the API
+            const lastMessage = messages[messages.length - 1];
+            const history = messages.slice(0, -1);
+
+            // Get user context from Firebase auth if available
+            let context = userContext;
+            if (typeof queBotAuth !== 'undefined' && queBotAuth.initialized) {
+                context = queBotAuth.getUserContext();
             }
 
-            // Build history (all messages except the last user message)
-            const history = messages.slice(0, -1).map(m => ({
-                role: m.role,
-                content: m.content
-            }));
-
-            const response = await fetch(this.baseUrl + 'chat.php', {
+            const response = await fetch(this.endpoint, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    message: lastUserMessage.content,
-                    history: history,
-                    userContext: userContext
+                    message: lastMessage.content,
+                    history: history.map(msg => ({
+                        role: msg.role,
+                        content: msg.content
+                    })),
+                    userContext: context
                 })
             });
 
-            // Check content type before parsing
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                const text = await response.text();
-                console.error('API returned non-JSON response:', text.substring(0, 200));
-                if (onError) onError('Error del servidor: respuesta inválida');
-                return;
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Error en la solicitud');
             }
 
             const data = await response.json();
-
-            if (!response.ok) {
-                if (onError) onError(data.error || 'Error al enviar mensaje');
-                return;
+            
+            if (data.error) {
+                throw new Error(data.error);
             }
 
-            // Track message count for registration prompts
-            if (typeof queBotAuth !== 'undefined') {
-                queBotAuth.incrementMessageCount();
-                queBotAuth.processRegistrationFromChat(lastUserMessage.content);
-            }
+            // Handle response with optional visualization
+            const textContent = data.response || data.content || '';
+            const vizData = data.visualization || null;
 
-            // Call onComplete with the response
-            if (onComplete) {
-                onComplete(data.response, null);
-            }
+            // Call chunk callback with full content
+            onChunk(textContent, textContent, vizData);
+            
+            // Call complete callback with content and viz data
+            onComplete(textContent, vizData);
 
         } catch (error) {
             console.error('API Error:', error);
-            if (onError) onError(error.message || 'Error de conexión');
+            onError(error.message || 'Error de conexión');
         }
     },
 
     /**
-     * Verificar estado del API
+     * Verificar si la API está configurada
      */
     async checkStatus() {
         try {
-            const response = await fetch(this.baseUrl + 'chat.php?status=1');
-            
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                console.error('Status check returned non-JSON');
-                return { configured: false };
-            }
-            
-            return await response.json();
+            const response = await fetch(this.endpoint + '?status=1');
+            const data = await response.json();
+            return data;
         } catch (error) {
-            console.error('Status check error:', error);
-            return { configured: false };
+            return { configured: false, error: error.message };
         }
     }
 };

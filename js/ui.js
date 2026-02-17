@@ -78,7 +78,7 @@ const UI = {
     },
 
     /**
-     * Cerrar sidebar (movil)
+     * Cerrar sidebar (móvil)
      */
     closeSidebar() {
         this.elements.sidebar.classList.remove('open');
@@ -140,6 +140,10 @@ const UI = {
                 this.createChatHistoryItem(chat, chat.id === currentChatId)
             );
         });
+
+        // Mostrar/ocultar secciones vacías
+        this.elements.todayChats.parentElement.style.display = todayChats.length ? 'block' : 'none';
+        this.elements.olderChats.parentElement.style.display = olderChats.length ? 'block' : 'none';
     },
 
     /**
@@ -147,105 +151,103 @@ const UI = {
      */
     createChatHistoryItem(chat, isActive) {
         const div = document.createElement('div');
-        div.className = `history-item ${isActive ? 'active' : ''}`;
+        div.className = `history-item${isActive ? ' active' : ''}`;
         div.dataset.chatId = chat.id;
-        
-        const title = chat.title || 'Nueva conversación';
         div.innerHTML = `
-            <svg class="history-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
-            <span class="history-item-title">${this.escapeHtml(title)}</span>
-            <button class="history-item-delete" title="Eliminar conversación">
+            <span class="history-item-text">${this.escapeHtml(chat.title)}</span>
+            <button class="history-item-delete" title="Eliminar">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    <path d="M3 6h18"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                 </svg>
             </button>
         `;
-        
         return div;
     },
 
     /**
-     * Renderizar mensaje individual
+     * Renderizar mensajes
      */
-    renderMessage(message, isUser = false) {
-        const div = document.createElement('div');
-        div.className = `message ${isUser ? 'user' : 'assistant'}`;
-        
-        // Process content for renders first
-        let processedContent = message.content;
-        let renderButtons = '';
-        
-        if (!isUser && typeof Renders !== 'undefined') {
-            const result = Renders.processMessage(processedContent);
-            processedContent = result.content;
-            renderButtons = result.buttons;
+    renderMessages(messages) {
+        if (messages.length === 0) {
+            this.elements.welcomeScreen.classList.remove('hidden');
+            this.elements.messagesList.innerHTML = '';
+            return;
         }
-        
-        const renderedContent = this.renderMarkdown(processedContent);
+
+        this.elements.welcomeScreen.classList.add('hidden');
+        this.elements.messagesList.innerHTML = '';
+
+        messages.forEach(message => {
+            this.appendMessage(message);
+        });
+
+        this.scrollToBottom();
+    },
+
+    /**
+     * Agregar mensaje al DOM
+     */
+    appendMessage(message, animate = false) {
+        this.elements.welcomeScreen.classList.add('hidden');
+
+        const div = document.createElement('div');
+        div.className = `message ${message.role}`;
+        div.dataset.messageId = message.id;
+
+        const time = message.timestamp ? this.formatTime(message.timestamp) : '';
+        const authorName = message.role === 'user' ? 'Tú' : 'QueBot';
+        const avatarContent = message.role === 'user' 
+            ? 'F' 
+            : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+               </svg>`;
+
+        // Process markdown and make links open in new tab
+        let bodyHtml = this.renderMarkdown(message.content);
         
         div.innerHTML = `
-            <div class="message-avatar">
-                ${isUser ? 
-                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' :
-                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>'
-                }
-            </div>
+            <div class="message-avatar">${avatarContent}</div>
             <div class="message-content">
-                ${renderedContent}
-                ${renderButtons}
+                <div class="message-header">
+                    <span class="message-author">${authorName}</span>
+                    <span class="message-time">${time}</span>
+                </div>
+                <div class="message-body">${bodyHtml}</div>
             </div>
         `;
 
-        // Make all external links open in new tab
+        // Make all links open in new tab
         div.querySelectorAll('a[href^="http"]').forEach(link => {
             link.setAttribute('target', '_blank');
             link.setAttribute('rel', 'noopener noreferrer');
         });
 
-        return div;
-    },
-
-    /**
-     * Añadir mensaje al chat
-     */
-    addMessage(content, isUser = false) {
-        // Ocultar pantalla de bienvenida
-        this.elements.welcomeScreen.style.display = 'none';
-        this.elements.messagesList.style.display = 'flex';
-
-        const message = { content, role: isUser ? 'user' : 'assistant' };
-        const messageEl = this.renderMessage(message, isUser);
-        this.elements.messagesList.appendChild(messageEl);
-        this.scrollToBottom();
+        this.elements.messagesList.appendChild(div);
         
-        return messageEl;
+        if (animate) {
+            this.scrollToBottom();
+        }
     },
 
     /**
-     * Actualizar último mensaje del asistente
+     * Actualizar contenido del último mensaje del asistente
      */
     updateLastAssistantMessage(content) {
         const messages = this.elements.messagesList.querySelectorAll('.message.assistant');
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage) {
-            const contentEl = lastMessage.querySelector('.message-content');
+        if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            const bodyEl = lastMessage.querySelector('.message-body');
+            bodyEl.innerHTML = this.renderMarkdown(content);
             
-            // Process content for renders
-            let processedContent = content;
-            let renderButtons = '';
-            
-            if (typeof Renders !== 'undefined') {
-                const result = Renders.processMessage(processedContent);
-                processedContent = result.content;
-                renderButtons = result.buttons;
-            }
-            
-            contentEl.innerHTML = this.renderMarkdown(processedContent) + renderButtons;
-            
-            // Make all external links open in new tab
-            contentEl.querySelectorAll('a[href^="http"]').forEach(link => {
+            // Make all links open in new tab
+            bodyEl.querySelectorAll('a[href^="http"]').forEach(link => {
                 link.setAttribute('target', '_blank');
                 link.setAttribute('rel', 'noopener noreferrer');
             });
@@ -255,11 +257,11 @@ const UI = {
     },
 
     /**
-     * Mostrar indicador de carga
+     * Agregar indicador de typing
      */
-    showTypingIndicator() {
+    addTypingIndicator() {
         const div = document.createElement('div');
-        div.className = 'message assistant typing-indicator-message';
+        div.className = 'message assistant typing';
         div.innerHTML = `
             <div class="message-avatar">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -269,8 +271,15 @@ const UI = {
                 </svg>
             </div>
             <div class="message-content">
-                <div class="typing-indicator">
-                    <span></span><span></span><span></span>
+                <div class="message-header">
+                    <span class="message-author">QueBot</span>
+                </div>
+                <div class="message-body">
+                    <div class="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
                 </div>
             </div>
         `;
@@ -279,35 +288,23 @@ const UI = {
     },
 
     /**
-     * Ocultar indicador de carga
+     * Remover indicador de typing
      */
-    hideTypingIndicator() {
-        const indicator = this.elements.messagesList.querySelector('.typing-indicator-message');
-        if (indicator) {
-            indicator.remove();
+    removeTypingIndicator() {
+        const typing = this.elements.messagesList.querySelector('.message.typing');
+        if (typing) {
+            typing.remove();
         }
     },
 
     /**
-     * Scroll al final del chat
-     */
-    scrollToBottom() {
-        this.elements.messagesArea.scrollTop = this.elements.messagesArea.scrollHeight;
-    },
-
-    /**
-     * Renderizar Markdown a HTML
+     * Renderizar markdown
      */
     renderMarkdown(text) {
         if (typeof marked !== 'undefined') {
             return marked.parse(text);
         }
-        // Fallback básico
-        return text
-            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\*(.+?)\*/g, '<em>$1</em>')
-            .replace(/`(.+?)`/g, '<code>$1</code>')
-            .replace(/\n/g, '<br>');
+        return this.escapeHtml(text).replace(/\n/g, '<br>');
     },
 
     /**
@@ -320,39 +317,33 @@ const UI = {
     },
 
     /**
-     * Mostrar toast notification
+     * Formatear hora
      */
-    showToast(message, type = 'info', duration = 3000) {
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.innerHTML = `
-            <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                ${type === 'error' ? 
-                    '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>' :
-                    '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>'}
-            </svg>
-            <span class="toast-message">${this.escapeHtml(message)}</span>
-        `;
-        
-        this.elements.toastContainer.appendChild(toast);
-        
-        // Forzar reflow para animación
-        toast.offsetHeight;
-        toast.classList.add('show');
-        
-        setTimeout(() => {
-            toast.classList.remove('show');
-            setTimeout(() => toast.remove(), 300);
-        }, duration);
+    formatTime(timestamp) {
+        const date = new Date(timestamp);
+        return date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
     },
 
     /**
-     * Auto-resize del input
+     * Scroll al final de los mensajes
      */
-    autoResizeInput() {
-        const input = this.elements.messageInput;
-        input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+    scrollToBottom() {
+        this.elements.messagesArea.scrollTop = this.elements.messagesArea.scrollHeight;
+    },
+
+    /**
+     * Actualizar título del chat
+     */
+    setChatTitle(title) {
+        this.elements.chatTitle.textContent = title;
+    },
+
+    /**
+     * Habilitar/deshabilitar input
+     */
+    setInputEnabled(enabled) {
+        this.elements.messageInput.disabled = !enabled;
+        this.elements.sendBtn.disabled = !enabled || this.elements.messageInput.value.trim() === '';
     },
 
     /**
@@ -361,56 +352,56 @@ const UI = {
     clearInput() {
         this.elements.messageInput.value = '';
         this.elements.messageInput.style.height = 'auto';
+        this.elements.sendBtn.disabled = true;
     },
 
     /**
-     * Habilitar/deshabilitar input
+     * Auto-resize del textarea
      */
-    setInputEnabled(enabled) {
-        this.elements.messageInput.disabled = !enabled;
-        this.elements.sendBtn.disabled = !enabled;
-        this.elements.attachBtn.disabled = !enabled;
+    autoResizeInput() {
+        const input = this.elements.messageInput;
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+        this.elements.sendBtn.disabled = input.value.trim() === '';
     },
 
     /**
-     * Renderizar chat completo
+     * Mostrar toast de notificación
      */
-    renderChat(chat) {
-        // Actualizar título
-        this.elements.chatTitle.textContent = chat.title || 'Nueva conversación';
+    showToast(message, type = 'info', duration = 5000) {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
         
-        // Limpiar mensajes
-        this.elements.messagesList.innerHTML = '';
-        
-        if (chat.messages.length === 0) {
-            // Mostrar pantalla de bienvenida
-            this.elements.welcomeScreen.style.display = 'flex';
-            this.elements.messagesList.style.display = 'none';
-        } else {
-            // Mostrar mensajes
-            this.elements.welcomeScreen.style.display = 'none';
-            this.elements.messagesList.style.display = 'flex';
-            
-            chat.messages.forEach(msg => {
-                const messageEl = this.renderMessage(msg, msg.role === 'user');
-                this.elements.messagesList.appendChild(messageEl);
-            });
-            
-            this.scrollToBottom();
+        const iconSvg = type === 'error' 
+            ? '<path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M15 9l-6 6M9 9l6 6"/>'
+            : '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/>';
+
+        toast.innerHTML = `
+            <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                ${iconSvg}
+            </svg>
+            <span class="toast-message">${this.escapeHtml(message)}</span>
+            <button class="toast-close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+            </button>
+        `;
+
+        this.elements.toastContainer.appendChild(toast);
+
+        const closeBtn = toast.querySelector('.toast-close');
+        closeBtn.addEventListener('click', () => toast.remove());
+
+        if (duration > 0) {
+            setTimeout(() => toast.remove(), duration);
         }
     },
 
     /**
-     * Show loading overlay
+     * Mostrar/ocultar loading
      */
-    showLoading() {
-        this.elements.loadingOverlay.classList.add('visible');
-    },
-
-    /**
-     * Hide loading overlay
-     */
-    hideLoading() {
-        this.elements.loadingOverlay.classList.remove('visible');
+    setLoading(show) {
+        this.elements.loadingOverlay.classList.toggle('visible', show);
     }
 };

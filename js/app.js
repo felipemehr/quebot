@@ -56,6 +56,8 @@ const App = {
         const cloudConversations = await queBotAuth.loadConversations();
         if (cloudConversations) {
             console.log('Loaded conversations from Firebase');
+            // Merge with local storage (prefer cloud)
+            // For now, just log - full sync logic can be added later
         }
     },
 
@@ -227,10 +229,11 @@ const App = {
     renderCurrentChat() {
         const chat = Storage.getChat(this.currentChatId);
         if (chat) {
-            UI.renderChat(chat);
+            UI.setChatTitle(chat.title);
+            UI.renderMessages(chat.messages);
         } else {
-            // Create empty chat object for rendering
-            UI.renderChat({ title: 'Nueva conversación', messages: [] });
+            UI.setChatTitle('Nueva conversación');
+            UI.renderMessages([]);
         }
     },
 
@@ -317,25 +320,33 @@ const App = {
             content: content
         };
         Storage.addMessage(this.currentChatId, userMessage);
-        UI.addMessage(content, true);
+        UI.appendMessage({ ...userMessage, id: Date.now(), timestamp: new Date().toISOString() }, true);
         UI.clearInput();
 
         // Actualizar título si es el primer mensaje
         const chat = Storage.getChat(this.currentChatId);
         if (chat.messages.length === 1) {
-            UI.elements.chatTitle.textContent = chat.title;
+            UI.setChatTitle(chat.title);
             this.renderChatHistory();
         }
 
         // Mostrar indicador de typing
-        UI.showTypingIndicator();
+        UI.addTypingIndicator();
 
         // Preparar mensajes para la API (solo los últimos 20 para contexto)
         const messagesForApi = chat.messages.slice(-20);
 
         // Crear mensaje placeholder para el asistente
         let assistantContent = '';
+        const assistantMessage = {
+            id: Date.now() + 1,
+            role: 'assistant',
+            content: '',
+            timestamp: new Date().toISOString()
+        };
+
         let messageAppended = false;
+        let lastMessageElement = null;
 
         // Enviar a la API
         await API.sendMessage(
@@ -343,8 +354,8 @@ const App = {
             // onChunk
             (chunk, fullContent, vizData) => {
                 if (!messageAppended) {
-                    UI.hideTypingIndicator();
-                    UI.addMessage(fullContent, false);
+                    UI.removeTypingIndicator();
+                    UI.appendMessage({ ...assistantMessage, content: fullContent }, true);
                     messageAppended = true;
                 } else {
                     UI.updateLastAssistantMessage(fullContent);
@@ -354,11 +365,9 @@ const App = {
             },
             // onComplete
             (finalContent, vizData) => {
-                UI.hideTypingIndicator();
+                UI.removeTypingIndicator();
                 if (!messageAppended) {
-                    UI.addMessage(finalContent, false);
-                } else {
-                    UI.updateLastAssistantMessage(finalContent);
+                    UI.appendMessage({ ...assistantMessage, content: finalContent }, true);
                 }
                 
                 // Render visualization if available
@@ -386,7 +395,7 @@ const App = {
             },
             // onError
             (error) => {
-                UI.hideTypingIndicator();
+                UI.removeTypingIndicator();
                 UI.showToast(error, 'error');
                 this.isProcessing = false;
                 UI.setInputEnabled(true);
