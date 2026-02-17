@@ -78,7 +78,7 @@ const UI = {
     },
 
     /**
-     * Cerrar sidebar (móvil)
+     * Cerrar sidebar (movil)
      */
     closeSidebar() {
         this.elements.sidebar.classList.remove('open');
@@ -141,7 +141,7 @@ const UI = {
             );
         });
 
-        // Mostrar/ocultar secciones vacías
+        // Mostrar/ocultar secciones vacias
         this.elements.todayChats.parentElement.style.display = todayChats.length ? 'block' : 'none';
         this.elements.olderChats.parentElement.style.display = olderChats.length ? 'block' : 'none';
     },
@@ -192,7 +192,7 @@ const UI = {
     /**
      * Agregar mensaje al DOM
      */
-    appendMessage(message, animate = false) {
+    async appendMessage(message, animate = false) {
         this.elements.welcomeScreen.classList.add('hidden');
 
         const div = document.createElement('div');
@@ -200,7 +200,7 @@ const UI = {
         div.dataset.messageId = message.id;
 
         const time = message.timestamp ? this.formatTime(message.timestamp) : '';
-        const authorName = message.role === 'user' ? 'Tú' : 'QueBot';
+        const authorName = message.role === 'user' ? 'Tu' : 'QueBot';
         const avatarContent = message.role === 'user' 
             ? 'F' 
             : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -209,6 +209,12 @@ const UI = {
                 <path d="M2 12l10 5 10-5"/>
                </svg>`;
 
+        // Process render commands in assistant messages
+        let content = message.content;
+        if (message.role === 'assistant' && typeof Renders !== 'undefined') {
+            content = await Renders.processMessage(content, div);
+        }
+
         div.innerHTML = `
             <div class="message-avatar">${avatarContent}</div>
             <div class="message-content">
@@ -216,7 +222,7 @@ const UI = {
                     <span class="message-author">${authorName}</span>
                     <span class="message-time">${time}</span>
                 </div>
-                <div class="message-body">${this.renderMarkdown(message.content)}</div>
+                <div class="message-body">${this.renderMarkdown(content)}</div>
             </div>
         `;
 
@@ -228,14 +234,21 @@ const UI = {
     },
 
     /**
-     * Actualizar contenido del último mensaje del asistente
+     * Actualizar contenido del ultimo mensaje del asistente
      */
-    updateLastAssistantMessage(content) {
+    async updateLastAssistantMessage(content) {
         const messages = this.elements.messagesList.querySelectorAll('.message.assistant');
         if (messages.length > 0) {
             const lastMessage = messages[messages.length - 1];
             const bodyEl = lastMessage.querySelector('.message-body');
-            bodyEl.innerHTML = this.renderMarkdown(content);
+            
+            // Process render commands
+            let processedContent = content;
+            if (typeof Renders !== 'undefined') {
+                processedContent = await Renders.processMessage(content, lastMessage);
+            }
+            
+            bodyEl.innerHTML = this.renderMarkdown(processedContent);
             this.scrollToBottom();
         }
     },
@@ -316,7 +329,7 @@ const UI = {
     },
 
     /**
-     * Actualizar título del chat
+     * Actualizar titulo del chat
      */
     setChatTitle(title) {
         this.elements.chatTitle.textContent = title;
@@ -350,7 +363,7 @@ const UI = {
     },
 
     /**
-     * Mostrar toast de notificación
+     * Mostrar toast de notificacion
      */
     showToast(message, type = 'info', duration = 5000) {
         const toast = document.createElement('div');
