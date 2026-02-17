@@ -6,6 +6,7 @@
     <title>QueBot - Asistente Inteligente</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="css/auth.css">
+    <link rel="stylesheet" href="css/renders.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -98,7 +99,7 @@
                     </button>
                     <h1 class="chat-title" id="chatTitle">Nueva conversación</h1>
                     <div class="chat-actions">
-                        <button class="action-btn" id="previewToggle" title="Panel de preview">
+                        <button class="action-btn" id="previewToggle" title="Panel de visualización">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2"/>
                                 <path d="M9 3v18"/>
@@ -118,12 +119,12 @@
                             </svg>
                         </div>
                         <h2>¡Hola! Soy QueBot 👋</h2>
-                        <p>Tu asistente inteligente con búsqueda web. Puedo buscar propiedades, noticias, información y mucho más.</p>
+                        <p>Tu asistente inteligente con búsqueda web y visualizaciones. Puedo buscar propiedades, mostrarlas en mapas, comparar precios con gráficos y mucho más.</p>
                         <div class="suggestion-cards">
-                            <button class="suggestion-card" data-prompt="Busca parcelas en Melipeuco">
+                            <button class="suggestion-card" data-prompt="Busca parcelas en Melipeuco y muéstralas en un mapa">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
+                                    <circle cx="12" cy="10" r="3"/>
                                 </svg>
                                 <span>Buscar parcelas</span>
                             </button>
@@ -134,12 +135,13 @@
                                 </svg>
                                 <span>Noticias</span>
                             </button>
-                            <button class="suggestion-card" data-prompt="Precio del dólar en Chile">
+                            <button class="suggestion-card" data-prompt="Compara precios del dólar, UF y euro en Chile">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <line x1="12" y1="1" x2="12" y2="23"></line>
-                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                                    <path d="M18 20V10"/>
+                                    <path d="M12 20V4"/>
+                                    <path d="M6 20v-6"/>
                                 </svg>
-                                <span>Precio dólar</span>
+                                <span>Comparar precios</span>
                             </button>
                             <button class="suggestion-card" data-prompt="Ayúdame con código JavaScript">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -182,10 +184,10 @@
                 </div>
             </div>
 
-            <!-- Preview Panel -->
+            <!-- Preview Panel (Sidebar for visualizations) -->
             <aside class="preview-panel" id="previewPanel">
                 <div class="preview-header">
-                    <h3 id="previewTitle">Preview</h3>
+                    <h3 id="previewTitle">Visualización</h3>
                     <button class="close-preview" id="closePreview">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 6L6 18"/>
@@ -196,11 +198,10 @@
                 <div class="preview-content" id="previewContent">
                     <div class="preview-placeholder">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <rect x="3" y="3" width="18" height="18" rx="2"/>
-                            <circle cx="8.5" cy="8.5" r="1.5"/>
-                            <path d="M21 15l-5-5L5 21"/>
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
+                            <circle cx="12" cy="10" r="3"/>
                         </svg>
-                        <p>El contenido generado aparecerá aquí</p>
+                        <p>Los mapas, gráficos y tablas aparecerán aquí</p>
                     </div>
                 </div>
             </aside>
@@ -230,6 +231,7 @@
     <script src="js/api.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/viz.js"></script>
+    <script src="js/renders.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
