@@ -3,7 +3,7 @@
  * DuckDuckGo Search with timeout handling
  */
 
-function performSearch($query, $maxResults = 8) {
+function performWebSearch($query, $maxResults = 10) {
     $searchUrl = 'https://html.duckduckgo.com/html/?q=' . urlencode($query);
     
     $ch = curl_init();
@@ -12,7 +12,7 @@ function performSearch($query, $maxResults = 8) {
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        CURLOPT_TIMEOUT => 10, // Short timeout
+        CURLOPT_TIMEOUT => 10,
         CURLOPT_CONNECTTIMEOUT => 5
     ]);
     
@@ -21,7 +21,7 @@ function performSearch($query, $maxResults = 8) {
     curl_close($ch);
     
     if ($error || empty($html)) {
-        return [];
+        return ['results' => [], 'error' => $error ?: 'Empty response'];
     }
     
     $results = [];
@@ -53,7 +53,7 @@ function performSearch($query, $maxResults = 8) {
             $results[] = [
                 'title' => $title,
                 'url' => $url,
-                'snippet' => '' // We'll skip snippets to keep it simple
+                'snippet' => ''
             ];
         }
     }
@@ -67,5 +67,5 @@ function performSearch($query, $maxResults = 8) {
         }
     }
     
-    return $results;
+    return ['results' => $results];
 }
