@@ -6,9 +6,27 @@
     <title>QueBot - Asistente Inteligente</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .viz-container { margin: 15px 0; border-radius: 12px; overflow: hidden; }
+        .viz-map { height: 300px; border-radius: 12px; }
+        .viz-chart { height: 250px; padding: 15px; background: var(--bg-secondary); border-radius: 12px; }
+        .viz-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        .viz-table th, .viz-table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        .viz-table th { background: var(--bg-secondary); font-weight: 600; }
+        .viz-table tr:hover { background: var(--bg-hover); }
+        .property-card { background: var(--bg-secondary); border-radius: 12px; padding: 15px; margin: 10px 0; border: 1px solid var(--border-color); }
+        .property-card:hover { border-color: var(--accent-color); }
+        .property-title { font-weight: 600; margin-bottom: 5px; }
+        .property-location { color: var(--text-secondary); font-size: 0.9em; }
+        .property-price { color: #00c853; font-weight: bold; font-size: 1.2em; margin: 10px 0; }
+        .property-link { display: inline-block; background: var(--accent-color); color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 0.9em; }
+        .property-link:hover { opacity: 0.9; }
+        .leaflet-container { background: var(--bg-secondary); }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -99,23 +117,28 @@
                             </svg>
                         </div>
                         <h2>¿En qué puedo ayudarte hoy?</h2>
-                        <p>Soy QueBot, tu asistente inteligente. Puedo ayudarte con análisis, escritura, programación y mucho más.</p>
+                        <p>Soy QueBot, tu asistente inteligente con búsqueda web. Puedo buscar propiedades, noticias y más.</p>
                         <div class="suggestion-cards">
-                            <button class="suggestion-card" data-prompt="Ayúdame a analizar datos de ventas">
+                            <button class="suggestion-card" data-prompt="Busca parcelas en Melipeuco">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M3 3v18h18"/>
-                                    <path d="M18 17V9"/>
-                                    <path d="M13 17V5"/>
-                                    <path d="M8 17v-3"/>
+                                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
                                 </svg>
-                                <span>Analizar datos</span>
+                                <span>Buscar parcelas</span>
                             </button>
-                            <button class="suggestion-card" data-prompt="Escribe un email profesional">
+                            <button class="suggestion-card" data-prompt="Noticias de Chile hoy">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
                                     <path d="M22 6l-10 7L2 6"/>
                                 </svg>
-                                <span>Escribir email</span>
+                                <span>Noticias</span>
+                            </button>
+                            <button class="suggestion-card" data-prompt="Precio del dólar en Chile">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="1" x2="12" y2="23"></line>
+                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                                </svg>
+                                <span>Precio dólar</span>
                             </button>
                             <button class="suggestion-card" data-prompt="Ayúdame con código JavaScript">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -123,16 +146,6 @@
                                     <polyline points="8,6 2,12 8,18"/>
                                 </svg>
                                 <span>Programación</span>
-                            </button>
-                            <button class="suggestion-card" data-prompt="Resume este documento">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                    <path d="M14 2v6h6"/>
-                                    <path d="M16 13H8"/>
-                                    <path d="M16 17H8"/>
-                                    <path d="M10 9H8"/>
-                                </svg>
-                                <span>Resumir texto</span>
                             </button>
                         </div>
                     </div>
@@ -203,9 +216,12 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <script src="js/storage.js"></script>
     <script src="js/api.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/viz.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
