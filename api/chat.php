@@ -56,23 +56,34 @@ if (!isApiConfigured()) {
 
 $searchResults = null;
 $shouldSearch = false;
+$searchQuery = $userMessage; // What to actually search for
 $messageLower = mb_strtolower(trim($userMessage), 'UTF-8');
 $wordCount = str_word_count($messageLower);
 
-// Messages that are FOLLOW-UPS (never search for these)
+// ============================================
+// STEP 1: Detect follow-up / short messages
+// ============================================
+
 $followUpWords = [
     'sigue', 'continua', 'continúa', 'dale', 'ok', 'ya', 'listo',
     'bien', 'bueno', 'gracias', 'thanks', 'si', 'sí', 'no', 'vale',
     'eso', 'claro', 'perfecto', 'genial', 'bacán', 'cachay', 'cacha',
     'oka', 'okey', 'okay', 'wena', 'buena', 'entiendo', 'sipo', 'nopo',
-    'más', 'mas', 'otro', 'otra', 'venga', 'vamos'
+    'más', 'mas', 'otro', 'otra', 'venga', 'vamos', 'repite', '2', '1', '3'
 ];
 
 $isFollowUp = false;
 
-// Single word follow-ups
-if ($wordCount <= 1 && in_array($messageLower, $followUpWords)) {
-    $isFollowUp = true;
+// Single word follow-ups (including typos that look like follow-ups)
+if ($wordCount <= 1) {
+    if (in_array($messageLower, $followUpWords)) {
+        $isFollowUp = true;
+    }
+    // Common typos that are follow-ups
+    $typoFollowUps = ['ylo', 'ylos', 'yla', 'ylas', 'yel', 'ylos', 'qmas', 'yq', 'oq'];
+    if (in_array($messageLower, $typoFollowUps)) {
+        $isFollowUp = true;
+    }
 }
 
 // Short phrase follow-ups (2-3 words)
@@ -84,7 +95,9 @@ if (!$isFollowUp && $wordCount <= 3) {
         'como sigue', 'cómo sigue', 'dime mas', 'dime más',
         'cuentame mas', 'cuéntame más', 'algo mas', 'algo más',
         'ta bien', 'esta bien', 'está bien', 'muy bien',
-        'que otro', 'que otra', 'que más', 'muestrame', 'muéstrame'
+        'que otro', 'que otra', 'qué más', 'muéstrame', 'muestrame',
+        'y los links', 'y el link', 'y las url', 'los links',
+        'el mapa', 'la tabla', 'el grafico'
     ];
     foreach ($followUpPhrases as $phrase) {
         if (mb_strpos($messageLower, $phrase) === 0) {
@@ -94,11 +107,64 @@ if (!$isFollowUp && $wordCount <= 3) {
     }
 }
 
-// Only search if:
-// 1. NOT a follow-up message
-// 2. Message has at least 3 words (avoids typo-only searches like "ylo")
-// 3. Contains a search-triggering keyword
-if (!$isFollowUp && $wordCount >= 3) {
+// ============================================
+// STEP 2: Detect "search again" requests
+// Extract topic from conversation history
+// ============================================
+
+$isRepeatSearch = false;
+if (!$isFollowUp) {
+    $repeatPatterns = [
+        'busca otra vez', 'busca de nuevo', 'busca denuevo',
+        'repite la busqueda', 'repite la búsqueda', 'repite busqueda',
+        'vuelve a buscar', 'haz la busqueda', 'haz la búsqueda',
+        'intenta otra vez', 'intenta de nuevo', 'otra busqueda',
+        'misma busqueda', 'la misma busqueda'
+    ];
+    foreach ($repeatPatterns as $pattern) {
+        if (mb_strpos($messageLower, $pattern) !== false) {
+            $isRepeatSearch = true;
+            break;
+        }
+    }
+    // Simple "repite" or "otra vez" with word count 2-3
+    if (!$isRepeatSearch && $wordCount <= 3) {
+        if (preg_match('/^(repite|otra vez|de nuevo|busca otra|busca again)$/iu', $messageLower)) {
+            $isRepeatSearch = true;
+        }
+    }
+}
+
+// If it's a repeat search, extract topic from last user messages in history
+if ($isRepeatSearch && !empty($history)) {
+    $extractedTopic = '';
+    // Look backwards through history for the last substantial user message
+    for ($i = count($history) - 1; $i >= 0; $i--) {
+        if (isset($history[$i]['role']) && $history[$i]['role'] === 'user') {
+            $histMsg = mb_strtolower(trim($history[$i]['content']), 'UTF-8');
+            $histWordCount = str_word_count($histMsg);
+            // Skip short follow-up messages, find the real search query
+            if ($histWordCount >= 3 && !preg_match('/^(busca otra|repite|continua|sigue|dale|y lo|y los)/iu', $histMsg)) {
+                $extractedTopic = trim($history[$i]['content']);
+                break;
+            }
+        }
+    }
+    if (!empty($extractedTopic)) {
+        $shouldSearch = true;
+        $searchQuery = $extractedTopic;
+        $isFollowUp = false; // Override: this IS a search, just with extracted topic
+    } else {
+        // Couldn't find topic, treat as follow-up (Claude will use context)
+        $isFollowUp = true;
+    }
+}
+
+// ============================================
+// STEP 3: Determine if new search needed
+// ============================================
+
+if (!$isFollowUp && !$shouldSearch && $wordCount >= 3) {
     $searchKeywords = [
         'busca', 'buscar', 'encuentra', 'encontrar', 'search',
         'parcela', 'parcelas', 'terreno', 'terrenos', 'propiedad', 'propiedades',
@@ -136,19 +202,25 @@ if (!$isFollowUp && $wordCount >= 3) {
     }
 }
 
-// Also search if message is 2+ words and EXPLICITLY starts with search verb
+// Also search if message starts with explicit search verb (2+ words)
 if (!$isFollowUp && $wordCount >= 2 && !$shouldSearch) {
     if (preg_match('/^(busca|buscar|encuentra|search|google)\b/iu', $messageLower)) {
         $shouldSearch = true;
     }
 }
 
-// Perform web search if needed
+// ============================================
+// STEP 4: Perform search
+// ============================================
+
 if ($shouldSearch) {
-    $searchResults = performWebSearch($userMessage);
+    $searchResults = performWebSearch($searchQuery);
 }
 
-// Build messages array
+// ============================================
+// Build messages for Claude
+// ============================================
+
 $messages = [];
 
 // Add history
@@ -165,15 +237,15 @@ foreach ($history as $msg) {
 $fullUserMessage = $userMessage;
 
 if ($searchResults && !empty($searchResults['results'])) {
-    $fullUserMessage .= "\n\n---\nRESULTADOS DE BUSQUEDA WEB:\n";
+    $fullUserMessage .= "\n\n---\nRESULTADOS DE BÚSQUEDA WEB (búsqueda: \"" . $searchQuery . "\"):\n";
     foreach ($searchResults['results'] as $i => $result) {
         $num = $i + 1;
         $type = isset($result['type']) ? $result['type'] : 'unknown';
         $typeLabel = '';
         if ($type === 'specific') {
-            $typeLabel = ' [PAGINA ESPECIFICA]';
+            $typeLabel = ' [PÁGINA ESPECÍFICA]';
         } elseif ($type === 'listing') {
-            $typeLabel = ' [PAGINA DE LISTADO]';
+            $typeLabel = ' [PÁGINA DE LISTADO]';
         }
         
         $fullUserMessage .= "\n{$num}. {$result['title']}{$typeLabel}\n";
@@ -182,7 +254,16 @@ if ($searchResults && !empty($searchResults['results'])) {
             $fullUserMessage .= "   Info: {$result['snippet']}\n";
         }
     }
-    $fullUserMessage .= "\n---\nREGLAS: Usa SOLO URLs de arriba. URLs [ESPECIFICA] van directo al item. URLs [LISTADO] son paginas con multiples resultados, NO las presentes como una propiedad individual.";
+    $fullUserMessage .= "\n---\nREGLAS ESTRICTAS:\n";
+    $fullUserMessage .= "- Usa SOLO las URLs de arriba. NUNCA inventes URLs.\n";
+    $fullUserMessage .= "- URLs [ESPECÍFICA] van directo al item. URLs [LISTADO] son páginas con múltiples resultados.\n";
+    $fullUserMessage .= "- NO inventes nombres de propiedades, precios ni superficies que NO aparezcan en estos resultados.\n";
+    $fullUserMessage .= "- Si los resultados son listados generales, presenta los PORTALES con sus links, no propiedades ficticias.\n";
+    $fullUserMessage .= "- Si estos resultados NO tienen relación con la conversación, IGNÓRALOS y responde desde el contexto.\n";
+}
+
+if ($isRepeatSearch && !empty($extractedTopic)) {
+    $fullUserMessage .= "\n[NOTA: El usuario pidió repetir la búsqueda anterior sobre: \"" . $extractedTopic . "\"]";
 }
 
 $messages[] = [
@@ -224,7 +305,7 @@ curl_close($ch);
 
 if ($error) {
     http_response_code(500);
-    echo json_encode(['error' => 'Error de conexion: ' . $error]);
+    echo json_encode(['error' => 'Error de conexión: ' . $error]);
     exit;
 }
 
@@ -242,7 +323,7 @@ $data = json_decode($response, true);
 
 if (!isset($data['content'][0]['text'])) {
     http_response_code(500);
-    echo json_encode(['error' => 'Respuesta invalida de Claude']);
+    echo json_encode(['error' => 'Respuesta inválida de Claude']);
     exit;
 }
 
@@ -252,5 +333,6 @@ $assistantResponse = $data['content'][0]['text'];
 echo json_encode([
     'response' => $assistantResponse,
     'model' => CLAUDE_MODEL,
-    'searched' => $shouldSearch
+    'searched' => $shouldSearch,
+    'searchQuery' => $shouldSearch ? $searchQuery : null
 ]);
