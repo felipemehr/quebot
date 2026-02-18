@@ -40,7 +40,7 @@ $userContext = isset($input['userContext']) ? trim($input['userContext']) : '';
 
 if (empty($userMessage)) {
     http_response_code(400);
-    echo json_encode(['error' => 'Mensaje vacío']);
+    echo json_encode(['error' => 'Mensaje vac\u00edo']);
     exit;
 }
 
@@ -50,43 +50,77 @@ if (!isApiConfigured()) {
     exit;
 }
 
-// Check if message needs web search
+// ============================================
+// SMART SEARCH DECISION
+// ============================================
+
 $searchResults = null;
-$searchKeywords = [
-    'busca', 'buscar', 'encuentra', 'encontrar', 'search',
-    'parcela', 'parcelas', 'terreno', 'terrenos', 'propiedad', 'propiedades',
-    'casa', 'casas', 'departamento', 'departamentos', 'arriendo', 'venta',
-    'precio', 'precios', 'costo', 'costos', 'valor',
-    'noticias', 'news', 'actualidad', 'hoy',
-    'dólar', 'dolar', 'uf', 'utm', 'moneda', 'cambio',
-    'clima', 'tiempo', 'weather',
-    'restaurante', 'restaurantes', 'hotel', 'hoteles',
-    'vuelo', 'vuelos', 'pasaje', 'pasajes',
-    'donde', 'dónde', 'ubicación', 'dirección',
-    'teléfono', 'contacto', 'horario',
-    'información sobre', 'datos de', 'info de',
-    'sitio', 'página', 'web', 'link', 'url',
-    'mejor', 'mejores', 'top', 'ranking',
-    'comparar', 'comparación', 'versus', 'vs',
-    'cuánto', 'cuanto', 'cuál', 'cual', 'quién', 'quien',
-    'cómo llegar', 'como llegar', 'ruta', 'mapa',
-    'empresa', 'empresas', 'compañía', 'negocio',
-    'producto', 'productos', 'servicio', 'servicios',
-    'oferta', 'ofertas', 'descuento', 'promoción',
-    'evento', 'eventos', 'concierto', 'show',
-    'curso', 'cursos', 'carrera', 'universidad',
-    'trabajo', 'empleo', 'vacante', 'sueldo',
-    'ley', 'legal', 'trámite', 'documento',
-    'melipeuco', 'temuco', 'santiago', 'valparaíso', 'chile',
-    'inmobiliaria', 'corredora', 'corredor'
+$shouldSearch = false;
+$messageLower = mb_strtolower(trim($userMessage), 'UTF-8');
+$wordCount = str_word_count($messageLower);
+
+// Messages that are FOLLOW-UPS (never search for these)
+$followUpPatterns = [
+    '/^(sigue|continua|contin\x{fa}a|dale|ok|ya|listo|bien|bueno|gracias|thanks|si|s\x{ed}|no|vale|eso|claro|perfecto|genial|bacán|bac\x{e1}n|cachay|cacha|oka|okey|okay|wena|buena|ta bien|entiendo|sipo|nopo|y\?|m\x{e1}s|mas|otro|otra|sigue nomás|sigue nomas|dale nomas|vamos|venga|muestrame|mu\x{e9}strame|explica|explícame|expl\x{ed}came)$/iu',
+    '/^y (lo|la|el|los|las|que|como|donde|cuando|eso)\b/iu',
+    '/^(que|qué|como|cómo) (más|mas|sigue|otro)/iu',
+    '/^(cuéntame|cuentame|dime) (más|mas)/iu'
 ];
 
-$messageLower = mb_strtolower($userMessage, 'UTF-8');
-$shouldSearch = false;
-foreach ($searchKeywords as $keyword) {
-    if (strpos($messageLower, $keyword) !== false) {
-        $shouldSearch = true;
+$isFollowUp = false;
+foreach ($followUpPatterns as $pattern) {
+    if (preg_match($pattern, $messageLower)) {
+        $isFollowUp = true;
         break;
+    }
+}
+
+// Only search if:
+// 1. NOT a follow-up message
+// 2. Message has at least 3 words (avoids typo-only searches)
+// 3. Contains a search-triggering keyword
+if (!$isFollowUp && $wordCount >= 3) {
+    $searchKeywords = [
+        'busca', 'buscar', 'encuentra', 'encontrar', 'search',
+        'parcela', 'parcelas', 'terreno', 'terrenos', 'propiedad', 'propiedades',
+        'casa', 'casas', 'departamento', 'departamentos', 'arriendo', 'venta',
+        'precio', 'precios', 'costo', 'costos', 'valor',
+        'noticias', 'news', 'actualidad', 'hoy',
+        'd\x{f3}lar', 'dolar', 'uf', 'utm', 'moneda', 'cambio',
+        'clima', 'tiempo', 'weather',
+        'restaurante', 'restaurantes', 'hotel', 'hoteles',
+        'vuelo', 'vuelos', 'pasaje', 'pasajes',
+        'donde', 'd\x{f3}nde', 'ubicaci\x{f3}n', 'direcci\x{f3}n',
+        'tel\x{e9}fono', 'contacto', 'horario',
+        'informaci\x{f3}n sobre', 'datos de', 'info de',
+        'sitio', 'p\x{e1}gina', 'web', 'link', 'url',
+        'mejor', 'mejores', 'top', 'ranking',
+        'comparar', 'comparaci\x{f3}n', 'versus', 'vs',
+        'cu\x{e1}nto', 'cuanto', 'cu\x{e1}l', 'cual', 'qui\x{e9}n', 'quien',
+        'c\x{f3}mo llegar', 'como llegar', 'ruta', 'mapa',
+        'empresa', 'empresas', 'compa\x{f1}\x{ed}a', 'negocio',
+        'producto', 'productos', 'servicio', 'servicios',
+        'oferta', 'ofertas', 'descuento', 'promoci\x{f3}n',
+        'evento', 'eventos', 'concierto', 'show',
+        'curso', 'cursos', 'carrera', 'universidad',
+        'trabajo', 'empleo', 'vacante', 'sueldo',
+        'ley', 'legal', 'tr\x{e1}mite', 'documento',
+        'melipeuco', 'temuco', 'santiago', 'valpara\x{ed}so', 'chile',
+        'inmobiliaria', 'corredora', 'corredor'
+    ];
+
+    foreach ($searchKeywords as $keyword) {
+        if (mb_strpos($messageLower, $keyword) !== false) {
+            $shouldSearch = true;
+            break;
+        }
+    }
+}
+
+// Also search if message is 2 words but EXPLICITLY asking to search
+if (!$isFollowUp && $wordCount >= 2 && !$shouldSearch) {
+    if (preg_match('/^(busca|buscar|encuentra|search|google)\b/iu', $messageLower)) {
+        $shouldSearch = true;
     }
 }
 
@@ -112,15 +146,15 @@ foreach ($history as $msg) {
 $fullUserMessage = $userMessage;
 
 if ($searchResults && !empty($searchResults['results'])) {
-    $fullUserMessage .= "\n\n---\nRESULTADOS DE BÚSQUEDA WEB:\n";
+    $fullUserMessage .= "\n\n---\nRESULTADOS DE B\x{da}SQUEDA WEB:\n";
     foreach ($searchResults['results'] as $i => $result) {
         $num = $i + 1;
         $type = isset($result['type']) ? $result['type'] : 'unknown';
         $typeLabel = '';
         if ($type === 'specific') {
-            $typeLabel = ' [PÁGINA ESPECÍFICA]';
+            $typeLabel = ' [P\x{c1}GINA ESPEC\x{cd}FICA]';
         } elseif ($type === 'listing') {
-            $typeLabel = ' [PÁGINA DE LISTADO/BÚSQUEDA]';
+            $typeLabel = ' [P\x{c1}GINA DE LISTADO]';
         }
         
         $fullUserMessage .= "\n{$num}. {$result['title']}{$typeLabel}\n";
@@ -129,12 +163,7 @@ if ($searchResults && !empty($searchResults['results'])) {
             $fullUserMessage .= "   Info: {$result['snippet']}\n";
         }
     }
-    $fullUserMessage .= "\n---\nINSTRUCCIONES PARA LINKS:\n";
-    $fullUserMessage .= "- Las URLs marcadas [PÁGINA ESPECÍFICA] llevan a una propiedad/item individual - úsalas directamente\n";
-    $fullUserMessage .= "- Las URLs marcadas [PÁGINA DE LISTADO/BÚSQUEDA] llevan a un listado con MÚLTIPLES resultados - NO las presentes como si fueran de una propiedad específica\n";
-    $fullUserMessage .= "- Para listados, usa el texto 'Ver opciones en [nombre del sitio]' como link\n";
-    $fullUserMessage .= "- NUNCA inventes URLs. SOLO usa las URLs exactas de arriba\n";
-    $fullUserMessage .= "- Cada propiedad/item que menciones DEBE tener un hipervínculo si tienes su URL real";
+    $fullUserMessage .= "\n---\nREGLAS: Usa SOLO URLs de arriba. URLs [ESPEC\x{cd}FICA] van directo al item. URLs [LISTADO] son paginas con multiples resultados, NO las presentes como una propiedad individual.";
 }
 
 $messages[] = [
@@ -176,7 +205,7 @@ curl_close($ch);
 
 if ($error) {
     http_response_code(500);
-    echo json_encode(['error' => 'Error de conexión: ' . $error]);
+    echo json_encode(['error' => 'Error de conexi\x{f3}n: ' . $error]);
     exit;
 }
 
@@ -194,7 +223,7 @@ $data = json_decode($response, true);
 
 if (!isset($data['content'][0]['text'])) {
     http_response_code(500);
-    echo json_encode(['error' => 'Respuesta inválida de Claude']);
+    echo json_encode(['error' => 'Respuesta inv\x{e1}lida de Claude']);
     exit;
 }
 
