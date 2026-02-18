@@ -131,15 +131,20 @@ textarea {
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
-    transition: transform var(--transition-normal), min-width var(--transition-normal), width var(--transition-normal);
+    transition: min-width var(--transition-normal), width var(--transition-normal);
     z-index: 100;
+    overflow: hidden;
 }
 
 .sidebar.collapsed {
     min-width: 0;
     width: 0;
-    transform: translateX(-100%);
-    overflow: hidden;
+}
+
+/* When sidebar is collapsed, show the menu button in header (all screen sizes) */
+.sidebar.collapsed ~ .sidebar-overlay ~ .main-content .mobile-menu-btn,
+.sidebar.collapsed ~ .main-content .mobile-menu-btn {
+    display: flex;
 }
 
 .sidebar-header {
@@ -1310,15 +1315,14 @@ textarea {
         box-shadow: var(--shadow-lg);
     }
     
-    /* KEY FIX: Keep width on mobile so translateX works correctly */
-    /* Desktop .collapsed sets width:0 which makes translateX(-100%) = 0px */
+    /* On mobile, collapsed sidebar stays hidden via transform */
     .sidebar.collapsed {
         width: 280px;
         min-width: 280px;
         transform: translateX(-280px);
     }
     
-    /* Hamburger menu button visible */
+    /* Hamburger menu button always visible on mobile */
     .mobile-menu-btn {
         display: flex;
     }
