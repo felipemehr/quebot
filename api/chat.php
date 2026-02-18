@@ -208,21 +208,26 @@ if ($shouldSearch) {
 }
 
 // ============================================
-// STEP 5: Scrape listing pages for details
+// STEP 5: Scrape pages for property details
+// Scrape any non-specific URL (listing + unknown)
+// These may contain individual property listings
 // ============================================
 
 $scrapedListings = [];
 if ($shouldSearch && $searchResults && !empty($searchResults['results'])) {
-    $listingUrls = [];
+    $urlsToScrape = [];
     foreach ($searchResults['results'] as $result) {
-        if (isset($result['type']) && $result['type'] === 'listing') {
-            $listingUrls[] = $result['url'];
+        $type = isset($result['type']) ? $result['type'] : 'unknown';
+        // Scrape everything that's NOT a specific individual page
+        // Both 'listing' and 'unknown' may contain property listings
+        if ($type !== 'specific') {
+            $urlsToScrape[] = $result['url'];
         }
     }
-    // Scrape top 2 listing pages for detailed content
-    foreach (array_slice($listingUrls, 0, 2) as $listUrl) {
-        $scraped = scrapeListingPage($listUrl);
-        if ($scraped) {
+    // Scrape top 3 pages max (balance between detail and speed)
+    foreach (array_slice($urlsToScrape, 0, 3) as $scrapeUrl) {
+        $scraped = scrapeListingPage($scrapeUrl);
+        if ($scraped && !empty($scraped['content'])) {
             $scrapedListings[] = $scraped;
         }
     }
@@ -270,9 +275,9 @@ if ($searchResults && !empty($searchResults['results'])) {
     $fullUserMessage .= "- Si estos resultados NO tienen relación con la conversación, IGNÓRALOS y responde desde el contexto.\n";
 }
 
-// Add scraped listing page content
+// Add scraped page content
 if (!empty($scrapedListings)) {
-    $fullUserMessage .= "\n\n---\nCONTENIDO EXTRAÍDO DE PÁGINAS DE LISTADO:\n";
+    $fullUserMessage .= "\n\n---\nCONTENIDO EXTRAÍDO DE PÁGINAS (scraped):\n";
     foreach ($scrapedListings as $scraped) {
         $fullUserMessage .= "\n📄 PÁGINA: {$scraped['url']}\n";
         $fullUserMessage .= "CONTENIDO:\n{$scraped['content']}\n";
