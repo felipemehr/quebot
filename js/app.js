@@ -16,6 +16,15 @@ const App = {
         // Inicializar UI
         UI.init();
 
+        // Set initial sidebar state based on screen width
+        if (window.innerWidth <= 768) {
+            // Mobile: sidebar hidden
+            UI.elements.sidebar.classList.remove('open');
+        } else {
+            // Desktop: sidebar visible (default state in CSS)
+            UI.elements.sidebar.classList.remove('collapsed');
+        }
+
         // Aplicar tema guardado
         const savedTheme = Storage.getTheme();
         UI.setTheme(savedTheme);
@@ -135,6 +144,16 @@ const App = {
                 UI.closePreview();
                 if (window.innerWidth <= 768) {
                     UI.closeSidebar();
+                }
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 768) {
+                // Desktop: remove overlay, show sidebar normally
+                if (UI.elements.sidebarOverlay) {
+                    UI.elements.sidebarOverlay.classList.remove('visible');
                 }
             }
         });
