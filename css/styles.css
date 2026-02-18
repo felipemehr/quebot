@@ -139,6 +139,7 @@ textarea {
     min-width: 0;
     width: 0;
     transform: translateX(-100%);
+    overflow: hidden;
 }
 
 .sidebar-header {
@@ -1292,7 +1293,7 @@ textarea {
    ======================================== */
 
 @media (max-width: 768px) {
-    /* Sidebar: hidden by default, overlay when open */
+    /* Sidebar: fixed overlay, hidden by default */
     .sidebar {
         position: fixed;
         left: 0;
@@ -1300,7 +1301,7 @@ textarea {
         width: 280px;
         min-width: 280px;
         z-index: 200;
-        transform: translateX(-100%);
+        transform: translateX(-280px);
         box-shadow: none;
     }
     
@@ -1309,8 +1310,12 @@ textarea {
         box-shadow: var(--shadow-lg);
     }
     
+    /* KEY FIX: Keep width on mobile so translateX works correctly */
+    /* Desktop .collapsed sets width:0 which makes translateX(-100%) = 0px */
     .sidebar.collapsed {
-        transform: translateX(-100%);
+        width: 280px;
+        min-width: 280px;
+        transform: translateX(-280px);
     }
     
     /* Hamburger menu button visible */
@@ -1432,10 +1437,22 @@ textarea {
         height: 20px;
     }
     
-    /* Preview panel full screen on mobile */
+    /* Preview panel: fullscreen overlay on mobile */
     .preview-panel {
+        position: fixed;
+        top: 0;
+        right: 0;
         width: 100vw;
         min-width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        z-index: 300;
+        transform: translateX(100%);
+    }
+    
+    .preview-panel.open {
+        position: fixed;
+        transform: translateX(0);
     }
     
     /* Toast notifications */
