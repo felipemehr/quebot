@@ -26,19 +26,18 @@ function performWebSearch($query, $maxResults = 10) {
     
     $results = [];
     
-    // Parse each result block individually for better accuracy
-    // DuckDuckGo wraps each result in a div.result
-    if (preg_match_all('/<div[^>]*class="[^"]*result[^"]*results_links[^"]*"[^>]*>(.*?)<\/div>\s*<\/div>/is', $html, $blocks)) {
-        foreach ($blocks[0] as $i => $block) {
-            if ($i >= $maxResults) break;
-            
-            // Extract URL and title
-            if (!preg_match('/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/is', $block, $linkMatch)) {
-                continue;
-            }
-            
-            $rawUrl = html_entity_decode($linkMatch[1]);
-            $title = html_entity_decode(strip_tags($linkMatch[2]));
+    // ============================================
+    // Strategy: Extract titles/URLs and snippets separately, then pair by index
+    // The block-based approach misses snippets because DuckDuckGo's HTML
+    // has the snippet OUTSIDE the inner div nesting that block regex captures
+    // ============================================
+    
+    // Step 1: Extract all title links (result__a)
+    $titles = [];
+    if (preg_match_all('/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/is', $html, $titleMatches, PREG_SET_ORDER)) {
+        foreach ($titleMatches as $match) {
+            $rawUrl = html_entity_decode($match[1]);
+            $title = html_entity_decode(strip_tags($match[2]));
             
             // Extract actual URL from DuckDuckGo redirect
             $url = $rawUrl;
@@ -56,65 +55,42 @@ function performWebSearch($query, $maxResults = 10) {
                 $url = 'https:' . $url;
             }
             
-            // Extract snippet - try multiple patterns
-            $snippet = '';
-            if (preg_match('/<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/is', $block, $snippetMatch)) {
-                $snippet = html_entity_decode(strip_tags($snippetMatch[1]));
-            } elseif (preg_match('/<div[^>]*class="result__snippet"[^>]*>(.*?)<\/div>/is', $block, $snippetMatch)) {
-                $snippet = html_entity_decode(strip_tags($snippetMatch[1]));
-            }
-            
-            // Classify URL type: specific page vs listing/search page
-            $urlType = classifyUrl($url);
-            
-            $results[] = [
+            $titles[] = [
                 'title' => trim($title),
-                'url' => $url,
-                'snippet' => trim($snippet),
-                'type' => $urlType
+                'url' => $url
             ];
         }
     }
     
-    // Fallback: simpler regex if block parsing found nothing
-    if (empty($results)) {
-        if (preg_match_all('/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/i', $html, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $i => $match) {
-                if ($i >= $maxResults) break;
-                
-                $rawUrl = html_entity_decode($match[1]);
-                $title = html_entity_decode(strip_tags($match[2]));
-                
-                $url = $rawUrl;
-                if (preg_match('/uddg=([^&]+)/', $rawUrl, $urlMatch)) {
-                    $url = urldecode($urlMatch[1]);
-                }
-                
-                if (strpos($url, 'duckduckgo.com') !== false) {
-                    continue;
-                }
-                
-                if (strpos($url, 'http') !== 0) {
-                    $url = 'https:' . $url;
-                }
-                
-                $results[] = [
-                    'title' => trim($title),
-                    'url' => $url,
-                    'snippet' => '',
-                    'type' => classifyUrl($url)
-                ];
+    // Step 2: Extract all snippets (result__snippet)
+    $snippets = [];
+    if (preg_match_all('/<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/is', $html, $snippetMatches)) {
+        foreach ($snippetMatches[1] as $snippet) {
+            $snippets[] = trim(html_entity_decode(strip_tags($snippet)));
+        }
+    }
+    // Also try div-based snippets as fallback
+    if (empty($snippets)) {
+        if (preg_match_all('/<div[^>]*class="result__snippet"[^>]*>(.*?)<\/div>/is', $html, $snippetMatches)) {
+            foreach ($snippetMatches[1] as $snippet) {
+                $snippets[] = trim(html_entity_decode(strip_tags($snippet)));
             }
         }
+    }
+    
+    // Step 3: Pair titles with snippets by index
+    foreach ($titles as $i => $titleData) {
+        if ($i >= $maxResults) break;
         
-        // Try to add snippets
-        if (preg_match_all('/<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/is', $html, $snippetMatches)) {
-            foreach ($snippetMatches[1] as $i => $snippet) {
-                if (isset($results[$i])) {
-                    $results[$i]['snippet'] = trim(html_entity_decode(strip_tags($snippet)));
-                }
-            }
-        }
+        $snippet = isset($snippets[$i]) ? $snippets[$i] : '';
+        $urlType = classifyUrl($titleData['url']);
+        
+        $results[] = [
+            'title' => $titleData['title'],
+            'url' => $titleData['url'],
+            'snippet' => $snippet,
+            'type' => $urlType
+        ];
     }
     
     return ['results' => $results];
@@ -128,7 +104,7 @@ function classifyUrl($url) {
     $listingPatterns = [
         '/\/buscar\//',
         '/\/search\//',
-        '/\/venta\/[a-z]+\/[a-z]+$/i',  // portalinmobiliario.com/venta/terreno/region
+        '/\/venta\/[a-z]+\/[a-z]+$/i',
         '/\/arriendo\/[a-z]+\/[a-z]+$/i',
         '/\/categoria\//',
         '/\/tag\//',
@@ -141,15 +117,15 @@ function classifyUrl($url) {
     
     // Patterns that indicate a SPECIFIC page (individual property/item)
     $specificPatterns = [
-        '/\/[0-9]{5,}/',        // URLs with long numeric IDs
-        '/\-[0-9]{5,}/',        // property-12345
+        '/\/[0-9]{5,}/',
+        '/\-[0-9]{5,}/',
         '/\/detalle\//',
         '/\/propiedad\//',
         '/\/ficha\//',
         '/\/inmueble\//',
         '/\/aviso\//',
-        '/MLC\-[0-9]+/',         // MercadoLibre
-        '/\/[A-Z]{2,3}[0-9]{5,}/'  // Coded IDs like PIR12345
+        '/MLC\-[0-9]+/',
+        '/\/[A-Z]{2,3}[0-9]{5,}/'
     ];
     
     foreach ($specificPatterns as $pattern) {
