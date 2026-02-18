@@ -113,6 +113,7 @@ textarea {
 .app-container {
     display: flex;
     height: 100vh;
+    height: 100dvh;
     width: 100vw;
     overflow: hidden;
 }
@@ -125,6 +126,7 @@ textarea {
     width: var(--sidebar-width);
     min-width: var(--sidebar-width);
     height: 100vh;
+    height: 100dvh;
     background: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
     display: flex;
@@ -348,6 +350,14 @@ textarea {
     display: flex;
     align-items: center;
     gap: 10px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--radius-md);
+    transition: background var(--transition-fast);
+}
+
+.user-info:hover {
+    background: var(--bg-hover);
 }
 
 .user-avatar {
@@ -361,11 +371,15 @@ textarea {
     justify-content: center;
     font-weight: 600;
     font-size: 0.875rem;
+    flex-shrink: 0;
 }
 
 .user-name {
     font-weight: 500;
     font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ========================================
@@ -376,6 +390,7 @@ textarea {
     flex: 1;
     display: flex;
     overflow: hidden;
+    min-width: 0;
 }
 
 .chat-container {
@@ -408,6 +423,7 @@ textarea {
     justify-content: center;
     border-radius: var(--radius-md);
     color: var(--text-secondary);
+    flex-shrink: 0;
 }
 
 .mobile-menu-btn:hover {
@@ -427,11 +443,13 @@ textarea {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
 }
 
 .chat-actions {
     display: flex;
     gap: 8px;
+    flex-shrink: 0;
 }
 
 .action-btn {
@@ -632,6 +650,8 @@ textarea {
     border-radius: var(--radius-lg);
     font-size: 0.9375rem;
     line-height: 1.6;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 .message.user .message-body {
@@ -697,6 +717,7 @@ textarea {
     background: #1e1e1e;
     border-radius: var(--radius-md);
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .message-body pre code {
@@ -715,9 +736,20 @@ textarea {
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
+/* Table wrapper for horizontal scroll */
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 12px 0;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
 .message-body table {
     width: 100%;
-    margin: 12px 0;
+    min-width: 400px;
+    margin: 0;
     border-collapse: collapse;
     font-size: 0.875rem;
 }
@@ -726,11 +758,14 @@ textarea {
     padding: 10px 12px;
     border: 1px solid var(--border-color);
     text-align: left;
+    white-space: nowrap;
 }
 
 .message-body th {
     background: var(--bg-tertiary);
     font-weight: 600;
+    position: sticky;
+    top: 0;
 }
 
 .message-body a {
@@ -853,6 +888,7 @@ textarea {
     font-size: 0.9375rem;
     line-height: 1.5;
     outline: none;
+    min-width: 0;
 }
 
 .message-input::placeholder {
@@ -905,13 +941,14 @@ textarea {
 }
 
 /* ========================================
-   Preview Panel
+   Preview Panel (Render Sidebar)
    ======================================== */
 
 .preview-panel {
     width: var(--preview-width);
     min-width: var(--preview-width);
     height: 100vh;
+    height: 100dvh;
     background: var(--bg-secondary);
     border-left: 1px solid var(--border-color);
     display: flex;
@@ -1046,6 +1083,7 @@ textarea {
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
     animation: toastIn 0.3s ease;
+    max-width: calc(100vw - 48px);
 }
 
 .toast.error {
@@ -1116,7 +1154,27 @@ textarea {
 }
 
 /* ========================================
-   Responsive Design
+   Sidebar Overlay (Mobile)
+   ======================================== */
+
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 150;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.sidebar-overlay.visible {
+    display: block;
+}
+
+/* ========================================
+   Responsive Design - Tablet
    ======================================== */
 
 @media (max-width: 1024px) {
@@ -1130,58 +1188,196 @@ textarea {
     }
 }
 
+/* ========================================
+   Responsive Design - Mobile
+   ======================================== */
+
 @media (max-width: 768px) {
+    /* Sidebar: hidden by default, overlay when open */
     .sidebar {
         position: fixed;
         left: 0;
         top: 0;
+        width: 280px;
+        min-width: 280px;
         z-index: 200;
         transform: translateX(-100%);
+        box-shadow: none;
     }
     
     .sidebar.open {
         transform: translateX(0);
+        box-shadow: var(--shadow-lg);
     }
     
     .sidebar.collapsed {
         transform: translateX(-100%);
     }
     
+    /* Hamburger menu button visible */
     .mobile-menu-btn {
         display: flex;
     }
     
+    /* Chat header */
+    .chat-header {
+        padding: 0 12px;
+        gap: 8px;
+    }
+    
+    .chat-title {
+        font-size: 0.9rem;
+    }
+    
+    /* Messages area */
+    .messages-area {
+        padding: 12px;
+    }
+    
+    .messages-list {
+        gap: 16px;
+    }
+    
+    /* Message layout */
+    .message {
+        gap: 8px;
+    }
+    
+    .message-avatar {
+        width: 30px;
+        height: 30px;
+        font-size: 0.75rem;
+    }
+    
+    .message-body {
+        padding: 10px 14px;
+        font-size: 0.875rem;
+    }
+    
+    .message-author {
+        font-size: 0.8rem;
+    }
+    
+    /* Tables: allow horizontal scroll */
+    .message-body table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+    }
+    
+    .message-body th, .message-body td {
+        padding: 8px 10px;
+        font-size: 0.8rem;
+    }
+    
+    /* Code blocks: scroll */
+    .message-body pre {
+        padding: 12px;
+        font-size: 0.75rem;
+    }
+    
+    /* Input area */
+    .input-area {
+        padding: 8px 12px 12px;
+    }
+    
+    .input-wrapper {
+        padding: 6px 8px;
+        gap: 4px;
+    }
+    
+    .message-input {
+        font-size: 16px; /* Prevents iOS zoom */
+        min-height: 36px;
+        padding: 8px 4px;
+    }
+    
+    .attach-btn, .send-btn {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .input-disclaimer {
+        font-size: 0.7rem;
+        margin-top: 6px;
+    }
+    
+    /* Welcome screen */
+    .welcome-screen {
+        padding: 24px 16px;
+    }
+    
+    .welcome-screen h2 {
+        font-size: 1.25rem;
+    }
+    
+    .welcome-icon {
+        width: 60px;
+        height: 60px;
+    }
+    
     .suggestion-cards {
         grid-template-columns: 1fr;
+        gap: 8px;
     }
     
-    .messages-area {
-        padding: 16px;
+    .suggestion-card {
+        padding: 14px 12px;
+        flex-direction: row;
+        font-size: 0.8rem;
     }
     
-    .input-area {
-        padding: 12px 16px 16px;
+    .suggestion-card svg {
+        width: 20px;
+        height: 20px;
     }
     
+    /* Preview panel full screen on mobile */
+    .preview-panel {
+        width: 100vw;
+        min-width: 100vw;
+    }
+    
+    /* Toast notifications */
+    .toast-container {
+        bottom: 80px;
+        right: 12px;
+        left: 12px;
+    }
+    
+    .toast {
+        max-width: 100%;
+    }
+}
+
+/* ========================================
+   Small phones
+   ======================================== */
+
+@media (max-width: 380px) {
     .chat-header {
-        padding: 0 16px;
+        padding: 0 8px;
     }
-}
-
-/* Sidebar overlay for mobile */
-.sidebar-overlay {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 150;
-}
-
-.sidebar-overlay.visible {
-    display: block;
+    
+    .chat-title {
+        font-size: 0.85rem;
+    }
+    
+    .action-btn {
+        width: 32px;
+        height: 32px;
+    }
+    
+    .action-btn svg {
+        width: 18px;
+        height: 18px;
+    }
+    
+    .message-body {
+        padding: 8px 12px;
+        font-size: 0.8125rem;
+    }
 }
 
 /* ========================================
@@ -1204,4 +1400,12 @@ textarea {
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-tertiary);
+}
+
+/* Mobile: thin scrollbars */
+@media (max-width: 768px) {
+    ::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+    }
 }
