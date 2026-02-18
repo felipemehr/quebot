@@ -112,16 +112,29 @@ foreach ($history as $msg) {
 $fullUserMessage = $userMessage;
 
 if ($searchResults && !empty($searchResults['results'])) {
-    $fullUserMessage .= "\n\n---\nRESULTADOS DE BÚSQUEDA WEB (usa estos links REALES en tu respuesta):\n";
+    $fullUserMessage .= "\n\n---\nRESULTADOS DE BÚSQUEDA WEB:\n";
     foreach ($searchResults['results'] as $i => $result) {
         $num = $i + 1;
-        $fullUserMessage .= "\n{$num}. {$result['title']}\n";
+        $type = isset($result['type']) ? $result['type'] : 'unknown';
+        $typeLabel = '';
+        if ($type === 'specific') {
+            $typeLabel = ' [PÁGINA ESPECÍFICA]';
+        } elseif ($type === 'listing') {
+            $typeLabel = ' [PÁGINA DE LISTADO/BÚSQUEDA]';
+        }
+        
+        $fullUserMessage .= "\n{$num}. {$result['title']}{$typeLabel}\n";
         $fullUserMessage .= "   URL: {$result['url']}\n";
         if (!empty($result['snippet'])) {
-            $fullUserMessage .= "   Descripción: {$result['snippet']}\n";
+            $fullUserMessage .= "   Info: {$result['snippet']}\n";
         }
     }
-    $fullUserMessage .= "\n---\nIMPORTANTE: Usa SOLO las URLs exactas de arriba. NO inventes links.";
+    $fullUserMessage .= "\n---\nINSTRUCCIONES PARA LINKS:\n";
+    $fullUserMessage .= "- Las URLs marcadas [PÁGINA ESPECÍFICA] llevan a una propiedad/item individual - úsalas directamente\n";
+    $fullUserMessage .= "- Las URLs marcadas [PÁGINA DE LISTADO/BÚSQUEDA] llevan a un listado con MÚLTIPLES resultados - NO las presentes como si fueran de una propiedad específica\n";
+    $fullUserMessage .= "- Para listados, usa el texto 'Ver opciones en [nombre del sitio]' como link\n";
+    $fullUserMessage .= "- NUNCA inventes URLs. SOLO usa las URLs exactas de arriba\n";
+    $fullUserMessage .= "- Cada propiedad/item que menciones DEBE tener un hipervínculo si tienes su URL real";
 }
 
 $messages[] = [
