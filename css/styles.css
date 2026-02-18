@@ -249,17 +249,17 @@ textarea {
 .history-items {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
 }
 
 .history-item {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
+    padding: 8px 12px;
     border-radius: var(--radius-md);
     color: var(--text-secondary);
-    font-size: 0.875rem;
+    font-size: 0.79rem;
     transition: all var(--transition-fast);
     cursor: pointer;
     text-align: left;
