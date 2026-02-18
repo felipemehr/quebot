@@ -1,17 +1,18 @@
 <?php
 /**
- * Test endpoint para verificar búsqueda web
+ * Search test endpoint - for debugging only
  */
-require_once __DIR__ . '/search.php';
+header('Content-Type: application/json');
 
-header('Content-Type: application/json; charset=utf-8');
+require_once 'search.php';
 
-$query = $_GET['q'] ?? 'parcelas melipeuco';
+$query = isset($_GET['q']) ? $_GET['q'] : 'noticias de Chile hoy';
 
-$results = searchWeb($query, 5);
+$result = performWebSearch($query);
 
 echo json_encode([
     'query' => $query,
-    'results' => $results,
-    'timestamp' => date('Y-m-d H:i:s')
+    'resultCount' => count($result['results']),
+    'results' => $result['results'],
+    'error' => isset($result['error']) ? $result['error'] : null
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
