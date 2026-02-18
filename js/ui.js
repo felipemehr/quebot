@@ -14,6 +14,7 @@ const UI = {
     init() {
         this.elements = {
             sidebar: document.getElementById('sidebar'),
+            sidebarOverlay: document.getElementById('sidebarOverlay'),
             sidebarToggle: document.getElementById('sidebarToggle'),
             mobileMenuBtn: document.getElementById('mobileMenuBtn'),
             newChatBtn: document.getElementById('newChatBtn'),
@@ -72,19 +73,36 @@ const UI = {
     },
 
     /**
-     * Alternar sidebar
+     * Abrir sidebar
      */
-    toggleSidebar() {
-        this.elements.sidebar.classList.toggle('collapsed');
-        this.elements.sidebar.classList.toggle('open');
+    openSidebar() {
+        this.elements.sidebar.classList.add('open');
+        this.elements.sidebar.classList.remove('collapsed');
+        if (window.innerWidth <= 768 && this.elements.sidebarOverlay) {
+            this.elements.sidebarOverlay.classList.add('visible');
+        }
     },
 
     /**
-     * Cerrar sidebar (móvil)
+     * Cerrar sidebar
      */
     closeSidebar() {
         this.elements.sidebar.classList.remove('open');
         this.elements.sidebar.classList.add('collapsed');
+        if (this.elements.sidebarOverlay) {
+            this.elements.sidebarOverlay.classList.remove('visible');
+        }
+    },
+
+    /**
+     * Alternar sidebar
+     */
+    toggleSidebar() {
+        if (this.elements.sidebar.classList.contains('open')) {
+            this.closeSidebar();
+        } else {
+            this.openSidebar();
+        }
     },
 
     /**
@@ -169,31 +187,25 @@ const UI = {
     <div id="map"></div>
     <script>
         const locations = ${JSON.stringify(locations)};
-        
-        // Calculate center
         let centerLat = -38.84, centerLng = -71.68;
         if (locations.length > 0) {
             centerLat = locations.reduce((s, l) => s + l.lat, 0) / locations.length;
             centerLng = locations.reduce((s, l) => s + l.lng, 0) / locations.length;
         }
-        
         const map = L.map('map').setView([centerLat, centerLng], 12);
-        
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap'
+            attribution: '\u00a9 OpenStreetMap'
         }).addTo(map);
-        
         locations.forEach(loc => {
             const marker = L.marker([loc.lat, loc.lng]).addTo(map);
-            marker.bindPopup('<div class="custom-popup"><h3>' + (loc.title || 'Ubicación') + '</h3><p>' + (loc.description || '') + '</p></div>');
+            marker.bindPopup('<div class="custom-popup"><h3>' + (loc.title || 'Ubicaci\u00f3n') + '</h3><p>' + (loc.description || '') + '</p></div>');
         });
-        
         if (locations.length > 1) {
             const bounds = L.latLngBounds(locations.map(l => [l.lat, l.lng]));
             map.fitBounds(bounds, { padding: [20, 20] });
         }
-        
         setTimeout(() => map.invalidateSize(), 100);
+        setTimeout(() => map.invalidateSize(), 500);
     <\/script>
 </body>
 </html>`;
@@ -226,8 +238,9 @@ const UI = {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; background: #f9fafb; }
         h1 { font-size: 18px; color: #1a5f2a; margin-bottom: 16px; }
+        .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        th { background: #1a5f2a; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 13px; }
+        th { background: #1a5f2a; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 13px; white-space: nowrap; }
         td { padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; }
         tr:hover { background: #f0fdf4; }
         a { color: #1a5f2a; text-decoration: none; font-weight: 500; }
@@ -236,10 +249,12 @@ const UI = {
 </head>
 <body>
     <h1>${this.escapeHtml(title)}</h1>
+    <div class="table-scroll">
     <table>
         <thead><tr>${headers.map(h => `<th>${this.escapeHtml(h)}</th>`).join('')}</tr></thead>
         <tbody>${tableRows}</tbody>
     </table>
+    </div>
 </body>
 </html>`;
     },
@@ -286,11 +301,9 @@ const UI = {
     renderChatHistory(chats, currentChatId) {
         const grouped = Storage.getChatsGrouped();
         
-        // Limpiar contenedores
         this.elements.todayChats.innerHTML = '';
         this.elements.olderChats.innerHTML = '';
 
-        // Renderizar chats de hoy
         const todayChats = [...grouped.today, ...grouped.yesterday];
         todayChats.forEach(chat => {
             this.elements.todayChats.appendChild(
@@ -298,7 +311,6 @@ const UI = {
             );
         });
 
-        // Renderizar chats anteriores
         const olderChats = [...grouped.week, ...grouped.older];
         olderChats.forEach(chat => {
             this.elements.olderChats.appendChild(
@@ -306,7 +318,6 @@ const UI = {
             );
         });
 
-        // Mostrar/ocultar secciones vacías
         this.elements.todayChats.parentElement.style.display = todayChats.length ? 'block' : 'none';
         this.elements.olderChats.parentElement.style.display = olderChats.length ? 'block' : 'none';
     },
@@ -388,6 +399,9 @@ const UI = {
             </div>
         `;
 
+        // Post-process: wrap tables for horizontal scroll
+        this.wrapTablesForScroll(div);
+
         // Make all links open in new tab
         div.querySelectorAll('a[href^="http"]').forEach(link => {
             link.setAttribute('target', '_blank');
@@ -411,10 +425,22 @@ const UI = {
     },
 
     /**
+     * Wrap tables in scrollable container
+     */
+    wrapTablesForScroll(container) {
+        container.querySelectorAll('.message-body table').forEach(table => {
+            if (table.parentElement.classList.contains('table-wrapper')) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'table-wrapper';
+            table.parentNode.insertBefore(wrapper, table);
+            wrapper.appendChild(table);
+        });
+    },
+
+    /**
      * Process render commands in content
      */
     processRenderCommands(content) {
-        // Pattern: :::render-type{title="..."} followed by JSON and :::
         const renderPattern = /:::render-(map|table|chart)\{title="([^"]+)"\}\s*\n([\s\S]*?)\n:::/g;
         
         let processedContent = content.replace(renderPattern, (match, type, title, jsonStr) => {
@@ -422,21 +448,18 @@ const UI = {
                 const data = JSON.parse(jsonStr.trim());
                 const renderId = 'render_' + (++this.renderCounter);
                 
-                // Store render data
                 this.pendingRenders[renderId] = { type, title, data };
                 
-                // Return button placeholder
                 const icon = type === 'map' ? '🗺️' : type === 'table' ? '📊' : '📈';
                 const label = type === 'map' ? 'Ver Mapa' : type === 'table' ? 'Ver Tabla' : 'Ver Gráfico';
                 
                 return `<button class="render-btn render-btn-${type}" data-render-id="${renderId}">${icon} ${label}: ${this.escapeHtml(title)}</button>`;
             } catch (e) {
                 console.error('Error parsing render command:', e);
-                return match; // Return original if parsing fails
+                return ''; // Hide broken render commands
             }
         });
         
-        // Render remaining content as markdown
         return this.renderMarkdown(processedContent);
     },
 
@@ -449,6 +472,9 @@ const UI = {
             const lastMessage = messages[messages.length - 1];
             const bodyEl = lastMessage.querySelector('.message-body');
             bodyEl.innerHTML = this.processRenderCommands(content);
+            
+            // Wrap tables
+            this.wrapTablesForScroll(lastMessage);
             
             // Make all links open in new tab
             bodyEl.querySelectorAll('a[href^="http"]').forEach(link => {

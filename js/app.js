@@ -52,12 +52,9 @@ const App = {
             return;
         }
 
-        // Try to load conversations from Firestore
         const cloudConversations = await queBotAuth.loadConversations();
         if (cloudConversations) {
             console.log('Loaded conversations from Firebase');
-            // Merge with local storage (prefer cloud)
-            // For now, just log - full sync logic can be added later
         }
     },
 
@@ -65,9 +62,19 @@ const App = {
      * Configurar event listeners
      */
     setupEventListeners() {
-        // Sidebar toggle
+        // Sidebar toggle (desktop)
         UI.elements.sidebarToggle.addEventListener('click', () => UI.toggleSidebar());
-        UI.elements.mobileMenuBtn.addEventListener('click', () => UI.toggleSidebar());
+        
+        // Mobile hamburger menu
+        UI.elements.mobileMenuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            UI.toggleSidebar();
+        });
+
+        // Sidebar overlay (mobile) - close sidebar when clicking overlay
+        if (UI.elements.sidebarOverlay) {
+            UI.elements.sidebarOverlay.addEventListener('click', () => UI.closeSidebar());
+        }
 
         // Nueva conversación
         UI.elements.newChatBtn.addEventListener('click', () => this.newChat());
@@ -118,27 +125,17 @@ const App = {
             }
         });
 
-        // Click outside sidebar to close (mobile)
-        document.addEventListener('click', (e) => {
-            if (window.innerWidth <= 768) {
-                if (!UI.elements.sidebar.contains(e.target) && 
-                    !UI.elements.mobileMenuBtn.contains(e.target) &&
-                    UI.elements.sidebar.classList.contains('open')) {
-                    UI.closeSidebar();
-                }
-            }
-        });
-
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Ctrl/Cmd + K - Nueva conversación
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
                 e.preventDefault();
                 this.newChat();
             }
-            // Escape - Cerrar preview
             if (e.key === 'Escape') {
                 UI.closePreview();
+                if (window.innerWidth <= 768) {
+                    UI.closeSidebar();
+                }
             }
         });
 
@@ -178,7 +175,6 @@ const App = {
         this.renderChatHistory();
         UI.elements.messageInput.focus();
         
-        // Cerrar sidebar en móvil
         if (window.innerWidth <= 768) {
             UI.closeSidebar();
         }
@@ -193,11 +189,9 @@ const App = {
         this.renderCurrentChat();
         this.renderChatHistory();
         
-        // Update message count for this chat
         const chat = Storage.getChat(chatId);
         this.messageCount = chat ? Math.floor(chat.messages.length / 2) : 0;
         
-        // Cerrar sidebar en móvil
         if (window.innerWidth <= 768) {
             UI.closeSidebar();
         }
@@ -246,56 +240,6 @@ const App = {
     },
 
     /**
-     * Renderizar visualización (mapa, gráfico, etc)
-     */
-    renderVisualization(vizData, messageElement) {
-        if (!vizData || !messageElement) return;
-
-        const vizContainer = document.createElement('div');
-        vizContainer.className = 'viz-container';
-
-        if (vizData.type === 'map' && vizData.locations && vizData.locations.length > 0) {
-            // Create map container
-            const mapId = 'map-' + Date.now();
-            vizContainer.innerHTML = `
-                <div style="margin-top: 15px; background: var(--bg-secondary); border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color);">
-                    <div style="padding: 12px 15px; border-bottom: 1px solid var(--border-color); font-weight: 600;">
-                        🗺️ ${vizData.title || 'Mapa de Propiedades'}
-                    </div>
-                    <div id="${mapId}" class="viz-map"></div>
-                </div>
-            `;
-            messageElement.appendChild(vizContainer);
-
-            // Initialize map after DOM update
-            setTimeout(() => {
-                if (typeof Viz !== 'undefined' && typeof L !== 'undefined') {
-                    Viz.createMap(mapId, vizData.locations);
-                }
-            }, 100);
-        }
-
-        if (vizData.type === 'chart' && vizData.data) {
-            const chartId = 'chart-' + Date.now();
-            vizContainer.innerHTML = `
-                <div style="margin-top: 15px; background: var(--bg-secondary); border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color);">
-                    <div style="padding: 12px 15px; border-bottom: 1px solid var(--border-color); font-weight: 600;">
-                        📊 ${vizData.title || 'Gráfico'}
-                    </div>
-                    <div class="viz-chart"><canvas id="${chartId}"></canvas></div>
-                </div>
-            `;
-            messageElement.appendChild(vizContainer);
-
-            setTimeout(() => {
-                if (typeof Viz !== 'undefined' && typeof Chart !== 'undefined') {
-                    Viz.createChart(chartId, vizData.chartType || 'bar', vizData.data);
-                }
-            }, 100);
-        }
-    },
-
-    /**
      * Enviar mensaje
      */
     async sendMessage() {
@@ -310,7 +254,6 @@ const App = {
         // Increment message count in Firebase auth
         if (typeof queBotAuth !== 'undefined') {
             queBotAuth.incrementMessageCount();
-            // Try to extract user info from message
             queBotAuth.processRegistrationFromChat(content);
         }
 
@@ -333,10 +276,9 @@ const App = {
         // Mostrar indicador de typing
         UI.addTypingIndicator();
 
-        // Preparar mensajes para la API (solo los últimos 20 para contexto)
+        // Preparar mensajes para la API
         const messagesForApi = chat.messages.slice(-20);
 
-        // Crear mensaje placeholder para el asistente
         let assistantContent = '';
         const assistantMessage = {
             id: Date.now() + 1,
@@ -346,7 +288,6 @@ const App = {
         };
 
         let messageAppended = false;
-        let lastMessageElement = null;
 
         // Enviar a la API
         await API.sendMessage(
@@ -368,16 +309,6 @@ const App = {
                 UI.removeTypingIndicator();
                 if (!messageAppended) {
                     UI.appendMessage({ ...assistantMessage, content: finalContent }, true);
-                }
-                
-                // Render visualization if available
-                if (vizData || this.lastVizData) {
-                    const messages = document.querySelectorAll('.message.assistant');
-                    const lastMsg = messages[messages.length - 1];
-                    if (lastMsg) {
-                        const contentEl = lastMsg.querySelector('.message-content');
-                        this.renderVisualization(vizData || this.lastVizData, contentEl);
-                    }
                 }
 
                 // Guardar mensaje del asistente
@@ -426,12 +357,10 @@ const App = {
         const files = event.target.files;
         if (files.length === 0) return;
 
-        // Por ahora solo mostrar los nombres
         Array.from(files).forEach(file => {
             UI.showToast(`Archivo adjuntado: ${file.name}`, 'success', 3000);
         });
 
-        // Limpiar input
         event.target.value = '';
     }
 };
