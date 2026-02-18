@@ -817,6 +817,35 @@ textarea {
     }
 }
 
+
+/* Thinking indicator - animated steps */
+.thinking-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+}
+
+.thinking-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: thinkingSpin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+.thinking-text {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-style: italic;
+    transition: opacity 0.2s ease;
+}
+
+@keyframes thinkingSpin {
+    to { transform: rotate(360deg); }
+}
 /* ========================================
    Input Area
    ======================================== */

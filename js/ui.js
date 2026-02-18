@@ -7,6 +7,8 @@ const UI = {
     elements: {},
     renderCounter: 0,
     pendingRenders: {},
+    _thinkingInterval: null,
+    _thinkingIndex: 0,
 
     /**
      * Inicializar referencias a elementos del DOM
@@ -496,7 +498,7 @@ const UI = {
     },
 
     /**
-     * Agregar indicador de typing
+     * Agregar indicador de pensamiento con pasos animados
      */
     addTypingIndicator() {
         const div = document.createElement('div');
@@ -514,22 +516,49 @@ const UI = {
                     <span class="message-author">QueBot</span>
                 </div>
                 <div class="message-body">
-                    <div class="typing-indicator">
-                        <span></span>
-                        <span></span>
-                        <span></span>
+                    <div class="thinking-indicator">
+                        <div class="thinking-spinner"></div>
+                        <span class="thinking-text">Analizando consulta...</span>
                     </div>
                 </div>
             </div>
         `;
         this.elements.messagesList.appendChild(div);
         this.scrollToBottom();
+
+        // Cycle through thinking steps
+        const steps = [
+            { icon: '🔍', text: 'Analizando consulta...' },
+            { icon: '🌐', text: 'Buscando información...' },
+            { icon: '📄', text: 'Revisando páginas...' },
+            { icon: '📊', text: 'Procesando resultados...' },
+            { icon: '💰', text: 'Consultando valores...' },
+            { icon: '✍️', text: 'Preparando respuesta...' }
+        ];
+        this._thinkingIndex = 0;
+
+        this._thinkingInterval = setInterval(() => {
+            this._thinkingIndex = (this._thinkingIndex + 1) % steps.length;
+            const step = steps[this._thinkingIndex];
+            const textEl = document.querySelector('.thinking-indicator .thinking-text');
+            if (textEl) {
+                textEl.style.opacity = '0';
+                setTimeout(() => {
+                    textEl.textContent = step.text;
+                    textEl.style.opacity = '1';
+                }, 200);
+            }
+        }, 2500);
     },
 
     /**
-     * Remover indicador de typing
+     * Remover indicador de pensamiento
      */
     removeTypingIndicator() {
+        if (this._thinkingInterval) {
+            clearInterval(this._thinkingInterval);
+            this._thinkingInterval = null;
+        }
         const typing = this.elements.messagesList.querySelector('.message.typing');
         if (typing) {
             typing.remove();
