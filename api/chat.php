@@ -56,7 +56,7 @@ if (!isApiConfigured()) {
 
 $searchResults = null;
 $shouldSearch = false;
-$searchQuery = $userMessage; // What to actually search for
+$searchQuery = $userMessage;
 $messageLower = mb_strtolower(trim($userMessage), 'UTF-8');
 $wordCount = str_word_count($messageLower);
 
@@ -74,19 +74,16 @@ $followUpWords = [
 
 $isFollowUp = false;
 
-// Single word follow-ups (including typos that look like follow-ups)
 if ($wordCount <= 1) {
     if (in_array($messageLower, $followUpWords)) {
         $isFollowUp = true;
     }
-    // Common typos that are follow-ups
     $typoFollowUps = ['ylo', 'ylos', 'yla', 'ylas', 'yel', 'ylos', 'qmas', 'yq', 'oq'];
     if (in_array($messageLower, $typoFollowUps)) {
         $isFollowUp = true;
     }
 }
 
-// Short phrase follow-ups (2-3 words)
 if (!$isFollowUp && $wordCount <= 3) {
     $followUpPhrases = [
         'sigue nomas', 'sigue nomás', 'dale nomas', 'dale nomás',
@@ -109,7 +106,6 @@ if (!$isFollowUp && $wordCount <= 3) {
 
 // ============================================
 // STEP 2: Detect "search again" requests
-// Extract topic from conversation history
 // ============================================
 
 $isRepeatSearch = false;
@@ -127,7 +123,6 @@ if (!$isFollowUp) {
             break;
         }
     }
-    // Simple "repite" or "otra vez" with word count 2-3
     if (!$isRepeatSearch && $wordCount <= 3) {
         if (preg_match('/^(repite|otra vez|de nuevo|busca otra|busca again)$/iu', $messageLower)) {
             $isRepeatSearch = true;
@@ -135,15 +130,12 @@ if (!$isFollowUp) {
     }
 }
 
-// If it's a repeat search, extract topic from last user messages in history
 if ($isRepeatSearch && !empty($history)) {
     $extractedTopic = '';
-    // Look backwards through history for the last substantial user message
     for ($i = count($history) - 1; $i >= 0; $i--) {
         if (isset($history[$i]['role']) && $history[$i]['role'] === 'user') {
             $histMsg = mb_strtolower(trim($history[$i]['content']), 'UTF-8');
             $histWordCount = str_word_count($histMsg);
-            // Skip short follow-up messages, find the real search query
             if ($histWordCount >= 3 && !preg_match('/^(busca otra|repite|continua|sigue|dale|y lo|y los)/iu', $histMsg)) {
                 $extractedTopic = trim($history[$i]['content']);
                 break;
@@ -153,9 +145,8 @@ if ($isRepeatSearch && !empty($history)) {
     if (!empty($extractedTopic)) {
         $shouldSearch = true;
         $searchQuery = $extractedTopic;
-        $isFollowUp = false; // Override: this IS a search, just with extracted topic
+        $isFollowUp = false;
     } else {
-        // Couldn't find topic, treat as follow-up (Claude will use context)
         $isFollowUp = true;
     }
 }
@@ -202,7 +193,6 @@ if (!$isFollowUp && !$shouldSearch && $wordCount >= 3) {
     }
 }
 
-// Also search if message starts with explicit search verb (2+ words)
 if (!$isFollowUp && $wordCount >= 2 && !$shouldSearch) {
     if (preg_match('/^(busca|buscar|encuentra|search|google)\b/iu', $messageLower)) {
         $shouldSearch = true;
@@ -218,12 +208,32 @@ if ($shouldSearch) {
 }
 
 // ============================================
+// STEP 5: Scrape listing pages for details
+// ============================================
+
+$scrapedListings = [];
+if ($shouldSearch && $searchResults && !empty($searchResults['results'])) {
+    $listingUrls = [];
+    foreach ($searchResults['results'] as $result) {
+        if (isset($result['type']) && $result['type'] === 'listing') {
+            $listingUrls[] = $result['url'];
+        }
+    }
+    // Scrape top 2 listing pages for detailed content
+    foreach (array_slice($listingUrls, 0, 2) as $listUrl) {
+        $scraped = scrapeListingPage($listUrl);
+        if ($scraped) {
+            $scrapedListings[] = $scraped;
+        }
+    }
+}
+
+// ============================================
 // Build messages for Claude
 // ============================================
 
 $messages = [];
 
-// Add history
 foreach ($history as $msg) {
     if (isset($msg['role']) && isset($msg['content'])) {
         $messages[] = [
@@ -233,7 +243,6 @@ foreach ($history as $msg) {
     }
 }
 
-// Build user message with search results and context
 $fullUserMessage = $userMessage;
 
 if ($searchResults && !empty($searchResults['results'])) {
@@ -258,8 +267,23 @@ if ($searchResults && !empty($searchResults['results'])) {
     $fullUserMessage .= "- Usa SOLO las URLs de arriba. NUNCA inventes URLs.\n";
     $fullUserMessage .= "- URLs [ESPECÍFICA] van directo al item. URLs [LISTADO] son páginas con múltiples resultados.\n";
     $fullUserMessage .= "- NO inventes nombres de propiedades, precios ni superficies que NO aparezcan en estos resultados.\n";
-    $fullUserMessage .= "- Si los resultados son listados generales, presenta los PORTALES con sus links, no propiedades ficticias.\n";
     $fullUserMessage .= "- Si estos resultados NO tienen relación con la conversación, IGNÓRALOS y responde desde el contexto.\n";
+}
+
+// Add scraped listing page content
+if (!empty($scrapedListings)) {
+    $fullUserMessage .= "\n\n---\nCONTENIDO EXTRAÍDO DE PÁGINAS DE LISTADO:\n";
+    foreach ($scrapedListings as $scraped) {
+        $fullUserMessage .= "\n📄 PÁGINA: {$scraped['url']}\n";
+        $fullUserMessage .= "CONTENIDO:\n{$scraped['content']}\n";
+        if (!empty($scraped['links'])) {
+            $fullUserMessage .= "\nLINKS INTERNOS:\n{$scraped['links']}\n";
+        }
+        $fullUserMessage .= "\n---\n";
+    }
+    $fullUserMessage .= "\nEXTRAE las propiedades individuales de este contenido.\n";
+    $fullUserMessage .= "Presenta en tabla: Link, Superficie, Precio, Precio/m², Atractivos, Contras, Rating (⭐1-5).\n";
+    $fullUserMessage .= "Solo datos reales del contenido. Si falta dato, pon 'N/E'. NO inventes.\n";
 }
 
 if ($isRepeatSearch && !empty($extractedTopic)) {
@@ -329,10 +353,10 @@ if (!isset($data['content'][0]['text'])) {
 
 $assistantResponse = $data['content'][0]['text'];
 
-// Return response
 echo json_encode([
     'response' => $assistantResponse,
     'model' => CLAUDE_MODEL,
     'searched' => $shouldSearch,
-    'searchQuery' => $shouldSearch ? $searchQuery : null
+    'searchQuery' => $shouldSearch ? $searchQuery : null,
+    'scraped' => count($scrapedListings)
 ]);
