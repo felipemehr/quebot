@@ -1,131 +1,127 @@
 <?php
-/**
- * DuckDuckGo Search with enhanced snippet extraction
- */
+// search.php - Web search via DuckDuckGo HTML + UF value from SII.cl
 
-function performWebSearch($query, $maxResults = 10) {
-    $searchUrl = 'https://html.duckduckgo.com/html/?q=' . urlencode($query);
+function getUFValue() {
+    $year = date('Y');
+    $month = (int)date('m');
+    $day = (int)date('d');
     
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => $searchUrl,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        CURLOPT_TIMEOUT => 10,
-        CURLOPT_CONNECTTIMEOUT => 5
+    $url = "https://www.sii.cl/valores_y_fechas/uf/uf{$year}.htm";
+    
+    $ctx = stream_context_create([
+        'http' => [
+            'timeout' => 5,
+            'header' => "User-Agent: Mozilla/5.0\r\n"
+        ]
     ]);
     
-    $html = curl_exec($ch);
-    $error = curl_error($ch);
-    curl_close($ch);
+    $html = @file_get_contents($url, false, $ctx);
+    if (!$html) return null;
     
-    if ($error || empty($html)) {
-        return ['results' => [], 'error' => $error ?: 'Empty response'];
+    // Month names in Spanish for section IDs
+    $monthNames = [
+        1 => 'enero', 2 => 'febrero', 3 => 'marzo', 4 => 'abril',
+        5 => 'mayo', 6 => 'junio', 7 => 'julio', 8 => 'agosto',
+        9 => 'septiembre', 10 => 'octubre', 11 => 'noviembre', 12 => 'diciembre'
+    ];
+    
+    $monthId = $monthNames[$month];
+    
+    // Extract the month section
+    $pattern = "/id='mes_{$monthId}'>(.*?)<\/div>\s*<\/div>/s";
+    if (!preg_match($pattern, $html, $monthMatch)) return null;
+    
+    $monthHtml = $monthMatch[1];
+    
+    // Table structure: each row has 3 pairs of (day, value)
+    // <th><strong>1</strong></th><td>39.703,50</td>
+    // <th><strong>11</strong></th><td>39.694,31</td>
+    // <th><strong>21</strong></th><td>39.750,94</td>
+    
+    // Extract all day-value pairs
+    $values = [];
+    preg_match_all('/<strong>(\d+)<\/strong><\/th>\s*<td[^>]*>([^<]*)<\/td>/s', $monthHtml, $matches, PREG_SET_ORDER);
+    
+    foreach ($matches as $m) {
+        $d = (int)$m[1];
+        $v = trim($m[2]);
+        if ($v !== '') {
+            $values[$d] = $v;
+        }
     }
     
-    $results = [];
-    
-    // Strategy: Extract titles/URLs and snippets separately, then pair by index
-    
-    // Step 1: Extract all title links (result__a)
-    $titles = [];
-    if (preg_match_all('/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/is', $html, $titleMatches, PREG_SET_ORDER)) {
-        foreach ($titleMatches as $match) {
-            $rawUrl = html_entity_decode($match[1]);
-            $title = html_entity_decode(strip_tags($match[2]));
-            
-            $url = $rawUrl;
-            if (preg_match('/uddg=([^&]+)/', $rawUrl, $urlMatch)) {
-                $url = urldecode($urlMatch[1]);
-            }
-            
-            if (strpos($url, 'duckduckgo.com') !== false) {
-                continue;
-            }
-            
-            if (strpos($url, 'http') !== 0) {
-                $url = 'https:' . $url;
-            }
-            
-            $titles[] = [
-                'title' => trim($title),
-                'url' => $url
+    // Try today, then go backwards to find most recent value
+    for ($d = $day; $d >= 1; $d--) {
+        if (isset($values[$d])) {
+            // Convert "39.733,94" to float 39733.94
+            $numStr = str_replace('.', '', $values[$d]);
+            $numStr = str_replace(',', '.', $numStr);
+            return [
+                'value' => (float)$numStr,
+                'formatted' => $values[$d],
+                'date' => sprintf('%04d-%02d-%02d', $year, $month, $d),
+                'source' => 'SII.cl'
             ];
         }
     }
     
-    // Step 2: Extract all snippets (result__snippet)
-    $snippets = [];
-    if (preg_match_all('/<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/is', $html, $snippetMatches)) {
-        foreach ($snippetMatches[1] as $snippet) {
-            $snippets[] = trim(html_entity_decode(strip_tags($snippet)));
-        }
-    }
-    if (empty($snippets)) {
-        if (preg_match_all('/<div[^>]*class="result__snippet"[^>]*>(.*?)<\/div>/is', $html, $snippetMatches)) {
-            foreach ($snippetMatches[1] as $snippet) {
-                $snippets[] = trim(html_entity_decode(strip_tags($snippet)));
+    // If current month has no values yet, try previous month
+    if ($month > 1) {
+        $prevMonth = $monthNames[$month - 1];
+        $pattern2 = "/id='mes_{$prevMonth}'>(.*?)<\/div>\s*<\/div>/s";
+        if (preg_match($pattern2, $html, $prevMatch)) {
+            $prevHtml = $prevMatch[1];
+            preg_match_all('/<strong>(\d+)<\/strong><\/th>\s*<td[^>]*>([^<]*)<\/td>/s', $prevHtml, $matches2, PREG_SET_ORDER);
+            $prevValues = [];
+            foreach ($matches2 as $m) {
+                $d = (int)$m[1];
+                $v = trim($m[2]);
+                if ($v !== '') $prevValues[$d] = $v;
+            }
+            if (!empty($prevValues)) {
+                $lastDay = max(array_keys($prevValues));
+                $numStr = str_replace('.', '', $prevValues[$lastDay]);
+                $numStr = str_replace(',', '.', $numStr);
+                return [
+                    'value' => (float)$numStr,
+                    'formatted' => $prevValues[$lastDay],
+                    'date' => sprintf('%04d-%02d-%02d', $year, $month - 1, $lastDay),
+                    'source' => 'SII.cl'
+                ];
             }
         }
     }
     
-    // Step 3: Pair titles with snippets by index
-    foreach ($titles as $i => $titleData) {
-        if ($i >= $maxResults) break;
-        
-        $snippet = isset($snippets[$i]) ? $snippets[$i] : '';
-        $urlType = classifyUrl($titleData['url']);
-        
-        $results[] = [
-            'title' => $titleData['title'],
-            'url' => $titleData['url'],
-            'snippet' => $snippet,
-            'type' => $urlType
-        ];
-    }
-    
-    return ['results' => $results];
+    return null;
 }
 
-/**
- * Classify URL as 'specific' (individual page) or 'listing' (search/category page)
- */
 function classifyUrl($url) {
-    $specificPatterns = [
-        '/\/[0-9]{5,}/',
-        '/\-[0-9]{5,}/',
-        '/\/detalle\//',
-        '/\/propiedad\//',
-        '/\/ficha\//',
-        '/\/inmueble\//',
-        '/\/aviso\//',
-        '/MLC\-[0-9]+/',
-        '/\/[A-Z]{2,3}[0-9]{5,}/'
-    ];
+    $url_lower = strtolower($url);
     
-    $listingPatterns = [
-        '/\/buscar\//',
-        '/\/search\//',
-        '/\/venta\/[a-z]+\/[a-z]+$/i',
-        '/\/arriendo\/[a-z]+\/[a-z]+$/i',
-        '/\/categoria\//',
-        '/\/tag\//',
-        '/[?&]q=/',
-        '/[?&]search=/',
-        '/[?&]query=/',
-        '/\/results\//',
-        '/\/listings\/?$/'
+    // Specific property patterns
+    $specificPatterns = [
+        '/\/(propiedad|property|listing|ficha|detalle|aviso)\//',
+        '/\/[A-Z0-9]{5,}\/?$/',
+        '/id=\d+/',
+        '/\d{6,}/',
+        '/-(casa|depto|departamento|parcela|terreno|sitio)-.*-\d+/',
     ];
     
     foreach ($specificPatterns as $pattern) {
-        if (preg_match($pattern, $url)) {
+        if (preg_match($pattern, $url_lower)) {
             return 'specific';
         }
     }
     
+    // Listing/portal patterns
+    $listingPatterns = [
+        '/\/(venta|arriendo|comprar|buscar|search|results|listings)\//',
+        '/\/(parcelas|casas|departamentos|terrenos|propiedades)\//',
+        '/category|region|comuna|sector/',
+    ];
+    
     foreach ($listingPatterns as $pattern) {
-        if (preg_match($pattern, $url)) {
+        if (preg_match($pattern, $url_lower)) {
             return 'listing';
         }
     }
@@ -133,91 +129,88 @@ function classifyUrl($url) {
     return 'unknown';
 }
 
-/**
- * Scrape a listing page to extract individual property details and links
- */
-function scrapeListingPage($url, $maxTextLength = 6000) {
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => $url,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        CURLOPT_TIMEOUT => 10,
-        CURLOPT_CONNECTTIMEOUT => 5,
-        CURLOPT_SSL_VERIFYPEER => false
+function searchDuckDuckGo($query, $numResults = 8) {
+    $url = 'https://html.duckduckgo.com/html/?q=' . urlencode($query);
+    
+    $ctx = stream_context_create([
+        'http' => [
+            'timeout' => 10,
+            'header' => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n"
+        ]
     ]);
-    $html = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
     
-    if (empty($html) || $httpCode !== 200) return null;
+    $html = @file_get_contents($url, false, $ctx);
+    if (!$html) return [];
     
-    $parsed = parse_url($url);
-    $baseHost = $parsed['scheme'] . '://' . $parsed['host'];
+    $results = [];
     
-    // Extract internal links with text (property links)
-    $links = [];
-    if (preg_match_all('/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/is', $html, $linkMatches, PREG_SET_ORDER)) {
-        foreach ($linkMatches as $match) {
-            $href = trim($match[1]);
-            $text = trim(strip_tags($match[2]));
-            if (empty($text) || mb_strlen($text) < 5) continue;
-            if (strpos($href, '#') === 0 || strpos($href, 'javascript') === 0 || strpos($href, 'mailto') === 0) continue;
-            
-            // Make absolute
-            if (strpos($href, 'http') !== 0) {
-                if (strpos($href, '/') === 0) {
-                    $href = $baseHost . $href;
-                } else {
-                    $href = $baseHost . '/' . $href;
-                }
-            }
-            
-            // Only same domain, skip navigation links
-            if (strpos($href, $parsed['host']) !== false && mb_strlen($text) > 5) {
-                $skipTexts = ['inicio', 'home', 'contacto', 'login', 'registro', 'ayuda', 'acerca',
-                              'términos', 'privacidad', 'ver más', 'ver todos', 'siguiente', 'anterior',
-                              'cookie', 'suscrib', 'newsletter', 'facebook', 'twitter', 'instagram'];
-                $skip = false;
-                foreach ($skipTexts as $skipText) {
-                    if (mb_stripos($text, $skipText) !== false) {
-                        $skip = true;
-                        break;
-                    }
-                }
-                if (!$skip) {
-                    $links[] = $href . ' | ' . mb_substr($text, 0, 120);
-                }
-            }
+    // Extract titles and URLs
+    preg_match_all('/class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/s', $html, $titleMatches, PREG_SET_ORDER);
+    
+    // Extract snippets  
+    preg_match_all('/class="result__snippet"[^>]*>(.*?)<\/a>/s', $html, $snippetMatches, PREG_SET_ORDER);
+    
+    $count = min(count($titleMatches), $numResults);
+    
+    for ($i = 0; $i < $count; $i++) {
+        $rawUrl = $titleMatches[$i][1];
+        $title = strip_tags($titleMatches[$i][2]);
+        
+        // DDG redirects - extract actual URL
+        if (preg_match('/uddg=([^&]+)/', $rawUrl, $urlMatch)) {
+            $rawUrl = urldecode($urlMatch[1]);
         }
+        
+        $snippet = '';
+        if (isset($snippetMatches[$i])) {
+            $snippet = strip_tags($snippetMatches[$i][1]);
+            $snippet = html_entity_decode($snippet, ENT_QUOTES, 'UTF-8');
+            $snippet = preg_replace('/\s+/', ' ', trim($snippet));
+        }
+        
+        $type = classifyUrl($rawUrl);
+        
+        $results[] = [
+            'title' => html_entity_decode($title, ENT_QUOTES, 'UTF-8'),
+            'url' => $rawUrl,
+            'snippet' => $snippet,
+            'type' => $type
+        ];
     }
     
-    // Strip non-content elements
-    $html = preg_replace('/<script[^>]*>.*?<\/script>/is', '', $html);
-    $html = preg_replace('/<style[^>]*>.*?<\/style>/is', '', $html);
-    $html = preg_replace('/<nav[^>]*>.*?<\/nav>/is', '', $html);
-    $html = preg_replace('/<footer[^>]*>.*?<\/footer>/is', '', $html);
-    $html = preg_replace('/<header[^>]*>.*?<\/header>/is', '', $html);
-    $html = preg_replace('/<!--.*?-->/s', '', $html);
+    return $results;
+}
+
+function scrapePageContent($url, $maxLength = 3000) {
+    $ctx = stream_context_create([
+        'http' => [
+            'timeout' => 8,
+            'header' => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n",
+            'follow_location' => true,
+            'max_redirects' => 3
+        ]
+    ]);
     
-    // Convert to text
+    $html = @file_get_contents($url, false, $ctx);
+    if (!$html) return null;
+    
+    // Remove scripts, styles, nav, header, footer
+    $html = preg_replace('/<script[^>]*>.*?<\/script>/si', '', $html);
+    $html = preg_replace('/<style[^>]*>.*?<\/style>/si', '', $html);
+    $html = preg_replace('/<nav[^>]*>.*?<\/nav>/si', '', $html);
+    $html = preg_replace('/<header[^>]*>.*?<\/header>/si', '', $html);
+    $html = preg_replace('/<footer[^>]*>.*?<\/footer>/si', '', $html);
+    
+    // Get text content
     $text = strip_tags($html);
     $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
-    $text = preg_replace('/[ \t]+/', ' ', $text);
-    $text = preg_replace('/\n{3,}/', "\n\n", $text);
+    $text = preg_replace('/\s+/', ' ', $text);
     $text = trim($text);
     
-    if (mb_strlen($text) > $maxTextLength) {
-        $text = mb_substr($text, 0, $maxTextLength) . '...';
+    if (strlen($text) > $maxLength) {
+        $text = substr($text, 0, $maxLength) . '...';
     }
     
-    $links = array_values(array_unique($links));
-    $linksText = implode("\n", array_slice($links, 0, 30));
-    
-    return [
-        'url' => $url,
-        'content' => $text,
-        'links' => $linksText
-    ];
+    return $text;
 }
+?>
