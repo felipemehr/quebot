@@ -498,11 +498,193 @@ const UI = {
     },
 
     /**
-     * Agregar indicador de pensamiento con pasos animados
+     * Detectar tipo de consulta y generar pasos contextuales
      */
-    addTypingIndicator() {
+    _buildThinkingSteps(query) {
+        if (!query) return this._defaultThinkingSteps();
+        
+        const q = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        
+        // Extract key terms for personalization
+        const location = this._extractLocation(q);
+        const topic = this._extractTopic(q);
+        
+        // Detect vertical
+        if (this._isRealEstateQuery(q)) return this._realEstateSteps(q, location);
+        if (this._isLegalQuery(q)) return this._legalSteps(q, topic);
+        if (this._isNewsQuery(q)) return this._newsSteps(q, topic);
+        if (this._isRetailQuery(q)) return this._retailSteps(q, topic);
+        if (this._isMapQuery(q)) return this._mapSteps(q, location);
+        
+        // General with search detection
+        if (q.includes('busca') || q.includes('encuentra') || q.includes('donde') || q.includes('como') || q.includes('quien')) {
+            return this._searchSteps(q, topic);
+        }
+        
+        return this._conversationalSteps(q);
+    },
+    
+    _isRealEstateQuery(q) {
+        const t = ['parcela', 'terreno', 'casa', 'depto', 'departamento', 'propiedad', 'arriendo',
+                    'arrienda', 'venta', 'inmobili', 'hectarea', 'sitio', 'lote', 'condominio',
+                    'dormitorio', '3d', '2d', '4d', 'uf ', 'cabana', 'fundo', 'agricola', 'chacra'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _isLegalQuery(q) {
+        const t = ['ley ', 'codigo', 'articulo', 'norma', 'decreto', 'legal', 'dfl ', 'reglamento',
+                    'constitucion', 'tribunal', 'copropiedad', 'urbanismo', 'procedimiento', 'derecho',
+                    'contrato', 'demanda', 'recurso'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _isNewsQuery(q) {
+        const t = ['noticia', 'hoy', 'ayer', 'actualidad', 'ultima hora', 'reciente',
+                    'paso con', 'paso en', 'crisis', 'elecciones', 'gobierno', 'economia'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _isRetailQuery(q) {
+        const t = ['precio', 'comprar', 'tienda', 'oferta', 'descuento', 'notebook',
+                    'celular', 'telefono', 'electrodomestico', 'barato', 'mejor precio'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _isMapQuery(q) {
+        const t = ['mapa', 'ubicacion', 'donde queda', 'coordenada', 'muestrame el mapa'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _extractLocation(q) {
+        const cities = {
+            'santiago': 'Santiago', 'valparaiso': 'Valpara\u00edso', 'vina del mar': 'Vi\u00f1a del Mar',
+            'concepcion': 'Concepci\u00f3n', 'la serena': 'La Serena', 'antofagasta': 'Antofagasta',
+            'temuco': 'Temuco', 'rancagua': 'Rancagua', 'talca': 'Talca', 'arica': 'Arica',
+            'iquique': 'Iquique', 'puerto montt': 'Puerto Montt', 'osorno': 'Osorno',
+            'valdivia': 'Valdivia', 'chillan': 'Chill\u00e1n', 'copiapo': 'Copiap\u00f3',
+            'punta arenas': 'Punta Arenas', 'melipeuco': 'Melipeuco', 'pucon': 'Puc\u00f3n',
+            'villarrica': 'Villarrica', 'olmue': 'Olmu\u00e9', 'limache': 'Limache',
+            'curico': 'Curic\u00f3', 'linares': 'Linares', 'los angeles': 'Los \u00c1ngeles',
+            'coyhaique': 'Coyhaique', 'calama': 'Calama', 'ovalle': 'Ovalle'
+        };
+        for (const [key, name] of Object.entries(cities)) {
+            if (q.includes(key)) return name;
+        }
+        const m = q.match(/\ben\s+([a-z\s]{3,20}?)(?:\s+(?:de|con|por|que|a |,|$))/);
+        if (m) return m[1].trim().replace(/\b\w/g, l => l.toUpperCase());
+        return null;
+    },
+    
+    _extractTopic(q) {
+        const stop = ['que', 'como', 'donde', 'busca', 'buscar', 'encuentra', 'quiero', 'necesito',
+                       'sobre', 'del', 'los', 'las', 'una', 'por', 'para', 'con', 'mas', 'muy',
+                       'hoy', 'ayer', 'mapa', 'dame', 'dime', 'cual', 'son', 'hay', 'tiene'];
+        const words = q.split(/\s+/).filter(w => w.length > 2 && !stop.includes(w));
+        return words.length > 0 ? words.slice(0, 3).join(' ') : null;
+    },
+    
+    _realEstateSteps(q, location) {
+        const loc = location ? ` en ${location}` : '';
+        const locShort = location || 'la zona';
+        return [
+            { icon: '\ud83c\udfe0', text: `Detectando b\u00fasqueda inmobiliaria${loc}...` },
+            { icon: '\ud83d\udd0e', text: `Generando b\u00fasquedas optimizadas para ${locShort}...` },
+            { icon: '\ud83c\udf10', text: 'Consultando portalinmobiliario.com, toctoc.com, yapo.cl...' },
+            { icon: '\ud83d\udcc4', text: 'Extrayendo datos de publicaciones encontradas...' },
+            { icon: '\ud83d\udcb0', text: 'Validando precios, superficies y UF...' },
+            { icon: '\ud83d\udcca', text: 'Ranking resultados por relevancia y confiabilidad...' },
+            { icon: '\u2705', text: 'Verificando links y datos reales...' },
+            { icon: '\u270d\ufe0f', text: 'Armando tabla comparativa...' }
+        ];
+    },
+    
+    _legalSteps(q, topic) {
+        const lawMatch = q.match(/ley\s*(\d[\d.]*)/);
+        const codeMatch = q.match(/codigo\s+(civil|penal|procedimiento|trabajo|comercio|aguas)/);
+        const artMatch = q.match(/articulo\s*(\d+)/);
+        let lawName = topic || 'normativa';
+        if (lawMatch) lawName = `Ley ${lawMatch[1]}`;
+        if (codeMatch) lawName = `C\u00f3digo ${codeMatch[1].charAt(0).toUpperCase() + codeMatch[1].slice(1)}`;
+        return [
+            { icon: '\u2696\ufe0f', text: `Detectando consulta legal: ${lawName}...` },
+            { icon: '\ud83d\udcda', text: 'Buscando en base de datos legal (5.344 art\u00edculos)...' },
+            { icon: '\ud83d\udd0e', text: artMatch ? `Localizando art\u00edculo ${artMatch[1]}...` : `Buscando art\u00edculos de ${lawName}...` },
+            { icon: '\ud83d\udcd6', text: 'Consultando LeyChile y BCN...' },
+            { icon: '\ud83e\udde0', text: 'Analizando texto legal aplicable...' },
+            { icon: '\u270d\ufe0f', text: 'Preparando respuesta con referencias...' }
+        ];
+    },
+    
+    _newsSteps(q, topic) {
+        const t = topic || 'actualidad';
+        return [
+            { icon: '\ud83d\udcf0', text: `Buscando noticias: ${t}...` },
+            { icon: '\ud83c\udf10', text: 'Consultando La Tercera, Emol, BioBio Chile...' },
+            { icon: '\ud83d\udcc4', text: 'Extrayendo art\u00edculos recientes...' },
+            { icon: '\u2705', text: 'Verificando fuentes y fechas...' },
+            { icon: '\u270d\ufe0f', text: 'Preparando resumen noticioso...' }
+        ];
+    },
+    
+    _retailSteps(q, topic) {
+        const t = topic || 'productos';
+        return [
+            { icon: '\ud83d\uded2', text: `Buscando ${t}...` },
+            { icon: '\ud83c\udf10', text: 'Consultando Solotodo, Falabella, Ripley, PCFactory...' },
+            { icon: '\ud83d\udcb0', text: 'Extrayendo precios y ofertas...' },
+            { icon: '\ud83d\udcca', text: 'Comparando opciones...' },
+            { icon: '\u270d\ufe0f', text: 'Preparando comparativa...' }
+        ];
+    },
+    
+    _mapSteps(q, location) {
+        const loc = location || 'la zona';
+        return [
+            { icon: '\ud83d\uddfa\ufe0f', text: `Preparando mapa de ${loc}...` },
+            { icon: '\ud83d\udccd', text: 'Obteniendo coordenadas verificadas...' },
+            { icon: '\ud83c\udfa8', text: 'Generando visualizaci\u00f3n interactiva...' },
+            { icon: '\u270d\ufe0f', text: 'Listo para mostrar...' }
+        ];
+    },
+    
+    _searchSteps(q, topic) {
+        const t = topic || 'tu consulta';
+        return [
+            { icon: '\ud83d\udd0d', text: `Analizando: ${t}...` },
+            { icon: '\ud83c\udf10', text: 'Buscando en fuentes confiables...' },
+            { icon: '\ud83d\udcc4', text: 'Revisando p\u00e1ginas encontradas...' },
+            { icon: '\ud83d\udcca', text: 'Procesando y verificando datos...' },
+            { icon: '\u270d\ufe0f', text: 'Preparando respuesta...' }
+        ];
+    },
+    
+    _conversationalSteps(q) {
+        return [
+            { icon: '\ud83e\udde0', text: 'Procesando tu mensaje...' },
+            { icon: '\ud83d\udcad', text: 'Pensando la mejor respuesta...' },
+            { icon: '\u270d\ufe0f', text: 'Escribiendo...' }
+        ];
+    },
+    
+    _defaultThinkingSteps() {
+        return [
+            { icon: '\ud83d\udd0d', text: 'Analizando consulta...' },
+            { icon: '\ud83c\udf10', text: 'Buscando informaci\u00f3n...' },
+            { icon: '\ud83d\udcca', text: 'Procesando resultados...' },
+            { icon: '\u270d\ufe0f', text: 'Preparando respuesta...' }
+        ];
+    },
+
+    /**
+     * Agregar indicador de pensamiento con pasos contextuales
+     */
+    addTypingIndicator(query) {
         const div = document.createElement('div');
         div.className = 'message assistant typing';
+        
+        const steps = this._buildThinkingSteps(query);
+        const firstStep = steps[0];
+        
         div.innerHTML = `
             <div class="message-avatar">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -518,7 +700,7 @@ const UI = {
                 <div class="message-body">
                     <div class="thinking-indicator">
                         <div class="thinking-spinner"></div>
-                        <span class="thinking-text">Analizando consulta...</span>
+                        <span class="thinking-text">${firstStep.text}</span>
                     </div>
                 </div>
             </div>
@@ -526,17 +708,7 @@ const UI = {
         this.elements.messagesList.appendChild(div);
         this.scrollToBottom();
 
-        // Cycle through thinking steps
-        const steps = [
-            { icon: '\ud83d\udd0d', text: 'Analizando consulta...' },
-            { icon: '\ud83c\udf10', text: 'Buscando informaci\u00f3n...' },
-            { icon: '\ud83d\udcc4', text: 'Revisando p\u00e1ginas...' },
-            { icon: '\ud83d\udcca', text: 'Procesando resultados...' },
-            { icon: '\ud83d\udcb0', text: 'Consultando valores...' },
-            { icon: '\u270d\ufe0f', text: 'Preparando respuesta...' }
-        ];
         this._thinkingIndex = 0;
-
         this._thinkingInterval = setInterval(() => {
             this._thinkingIndex = (this._thinkingIndex + 1) % steps.length;
             const step = steps[this._thinkingIndex];

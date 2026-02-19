@@ -1,6 +1,6 @@
 /**
  * QueBot - Main Application
- * Lógica principal de la aplicación
+ * L\u00f3gica principal de la aplicaci\u00f3n
  */
 
 const App = {
@@ -10,7 +10,7 @@ const App = {
     messageCount: 0,
 
     /**
-     * Inicializar aplicación
+     * Inicializar aplicaci\u00f3n
      */
     async init() {
         // Inicializar UI
@@ -83,7 +83,7 @@ const App = {
             UI.elements.sidebarOverlay.addEventListener('click', () => UI.closeSidebar());
         }
 
-        // Nueva conversación
+        // Nueva conversaci\u00f3n
         UI.elements.newChatBtn.addEventListener('click', () => this.newChat());
 
         // Theme toggle
@@ -181,7 +181,7 @@ const App = {
     },
 
     /**
-     * Crear nueva conversación
+     * Crear nueva conversaci\u00f3n
      */
     newChat() {
         const chat = Storage.createChat();
@@ -197,7 +197,7 @@ const App = {
     },
 
     /**
-     * Cargar conversación
+     * Cargar conversaci\u00f3n
      */
     loadChat(chatId) {
         this.currentChatId = chatId;
@@ -214,10 +214,10 @@ const App = {
     },
 
     /**
-     * Eliminar conversación
+     * Eliminar conversaci\u00f3n
      */
     deleteChat(chatId) {
-        if (confirm('¿Eliminar este caso?')) {
+        if (confirm('\u00bfEliminar este caso?')) {
             Storage.deleteChat(chatId);
             
             // Also delete from Firestore
@@ -247,7 +247,7 @@ const App = {
             UI.setChatTitle(chat.title);
             UI.renderMessages(chat.messages);
         } else {
-            UI.setChatTitle('Nueva Misión');
+            UI.setChatTitle('Nueva Misi\u00f3n');
             UI.renderMessages([]);
         }
     },
@@ -275,7 +275,7 @@ const App = {
             .slice(0, 3);
 
         if (activeCases.length === 0) {
-            grid.innerHTML = '<p class="no-cases-msg">Aún no tienes casos activos.</p>';
+            grid.innerHTML = '<p class="no-cases-msg">A\u00fan no tienes casos activos.</p>';
             return;
         }
 
@@ -350,7 +350,7 @@ const App = {
             this._lastUserMessageId = msgId;
         }
 
-        // Actualizar título si es el primer mensaje
+        // Actualizar t\u00edtulo si es el primer mensaje
         const chat = Storage.getChat(this.currentChatId);
         if (chat.messages.length === 1) {
             UI.setChatTitle(chat.title);
@@ -361,8 +361,8 @@ const App = {
             }
         }
 
-        // Mostrar indicador de typing
-        UI.addTypingIndicator();
+        // Mostrar indicador de typing contextual
+        UI.addTypingIndicator(content);
 
         // Preparar mensajes para la API
         const messagesForApi = chat.messages.slice(-20);
@@ -456,7 +456,7 @@ const App = {
     },
 
     /**
-     * Manejar selección de archivos
+     * Manejar selecci\u00f3n de archivos
      */
     handleFileSelect(event) {
         const files = event.target.files;
@@ -470,5 +470,5 @@ const App = {
     }
 };
 
-// Inicializar cuando el DOM esté listo
+// Inicializar cuando el DOM est\u00e9 listo
 document.addEventListener('DOMContentLoaded', () => App.init());
