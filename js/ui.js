@@ -158,7 +158,7 @@ const UI = {
         }
 
         this.elements.previewTitle.textContent = render.title;
-        this.elements.previewContent.innerHTML = `<iframe srcdoc="${this.escapeHtmlAttribute(html)}" style="width:100%;height:100%;border:none;"></iframe>`;
+        this.elements.previewContent.innerHTML = `<iframe sandbox="allow-scripts" srcdoc="${this.escapeHtmlAttribute(html)}" style="width:100%;height:100%;border:none;"></iframe>`;
         this.elements.previewPanel.classList.add('open');
         this.elements.previewToggle.classList.add('active');
     },
@@ -378,7 +378,7 @@ const UI = {
         div.dataset.messageId = message.id;
 
         const time = message.timestamp ? this.formatTime(message.timestamp) : '';
-        const authorName = message.role === 'user' ? 'Tú' : 'QueBot';
+        const authorName = message.role === 'user' ? 'T\u00fa' : 'QueBot';
         const avatarContent = message.role === 'user' 
             ? 'F' 
             : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -452,8 +452,8 @@ const UI = {
                 
                 this.pendingRenders[renderId] = { type, title, data };
                 
-                const icon = type === 'map' ? '🗺️' : type === 'table' ? '📊' : '📈';
-                const label = type === 'map' ? 'Ver Mapa' : type === 'table' ? 'Ver Tabla' : 'Ver Gráfico';
+                const icon = type === 'map' ? '\ud83d\uddfa\ufe0f' : type === 'table' ? '\ud83d\udcca' : '\ud83d\udcc8';
+                const label = type === 'map' ? 'Ver Mapa' : type === 'table' ? 'Ver Tabla' : 'Ver Gr\u00e1fico';
                 
                 return `<button class="render-btn render-btn-${type}" data-render-id="${renderId}">${icon} ${label}: ${this.escapeHtml(title)}</button>`;
             } catch (e) {
@@ -466,7 +466,7 @@ const UI = {
     },
 
     /**
-     * Actualizar contenido del último mensaje del asistente
+     * Actualizar contenido del \u00faltimo mensaje del asistente
      */
     updateLastAssistantMessage(content) {
         const messages = this.elements.messagesList.querySelectorAll('.message.assistant');
@@ -528,12 +528,12 @@ const UI = {
 
         // Cycle through thinking steps
         const steps = [
-            { icon: '🔍', text: 'Analizando consulta...' },
-            { icon: '🌐', text: 'Buscando información...' },
-            { icon: '📄', text: 'Revisando páginas...' },
-            { icon: '📊', text: 'Procesando resultados...' },
-            { icon: '💰', text: 'Consultando valores...' },
-            { icon: '✍️', text: 'Preparando respuesta...' }
+            { icon: '\ud83d\udd0d', text: 'Analizando consulta...' },
+            { icon: '\ud83c\udf10', text: 'Buscando informaci\u00f3n...' },
+            { icon: '\ud83d\udcc4', text: 'Revisando p\u00e1ginas...' },
+            { icon: '\ud83d\udcca', text: 'Procesando resultados...' },
+            { icon: '\ud83d\udcb0', text: 'Consultando valores...' },
+            { icon: '\u270d\ufe0f', text: 'Preparando respuesta...' }
         ];
         this._thinkingIndex = 0;
 
@@ -600,7 +600,7 @@ const UI = {
     },
 
     /**
-     * Actualizar título del chat
+     * Actualizar t\u00edtulo del chat
      */
     setChatTitle(title) {
         this.elements.chatTitle.textContent = title;
@@ -634,7 +634,7 @@ const UI = {
     },
 
     /**
-     * Mostrar toast de notificación
+     * Mostrar toast de notificaci\u00f3n
      */
     showToast(message, type = 'info', duration = 5000) {
         const toast = document.createElement('div');
