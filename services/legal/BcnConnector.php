@@ -14,54 +14,24 @@ class BcnConnector {
     private const MAX_RETRIES = 2;
     private const RETRY_DELAY = 3; // seconds
     
-    /**
-     * Fetch full XML of a norm's latest version
-     * @param string $idNorma BCN norm identifier
-     * @return array{xml: string, http_code: int, error: ?string}
-     */
     public function fetchNorm(string $idNorma): array {
-        $url = self::BASE_URL . '?' . http_build_query([
-            'opt' => 7,
-            'idNorma' => $idNorma
-        ]);
-        
+        $url = self::BASE_URL . '?' . http_build_query(['opt' => 7, 'idNorma' => $idNorma]);
         return $this->fetchWithRetry($url);
     }
     
-    /**
-     * Fetch norm metadata only (lighter request)
-     * @param string $idNorma BCN norm identifier
-     * @return array{xml: string, http_code: int, error: ?string}
-     */
     public function fetchNormMetadata(string $idNorma): array {
-        $url = self::BASE_URL . '?' . http_build_query([
-            'opt' => 4546,
-            'idNorma' => $idNorma
-        ]);
-        
+        $url = self::BASE_URL . '?' . http_build_query(['opt' => 4546, 'idNorma' => $idNorma]);
         return $this->fetchWithRetry($url);
     }
     
-    /**
-     * Search norms by text
-     * @param string $query Search text
-     * @param int $limit Max results
-     * @return array{xml: string, http_code: int, error: ?string}
-     */
     public function searchNorms(string $query, int $limit = 10): array {
-        $url = self::BASE_URL . '?' . http_build_query([
-            'opt' => 61,
-            'cadena' => $query,
-            'cantidad' => $limit
-        ]);
-        
+        $url = self::BASE_URL . '?' . http_build_query(['opt' => 61, 'cadena' => $query, 'cantidad' => $limit]);
         return $this->fetchWithRetry($url);
     }
     
     /**
      * Parse a full norm XML into structured data
-     * @param string $xmlString Raw XML from BCN
-     * @return array Parsed norm data
+     * Handles both namespaced and non-namespaced BCN XML
      */
     public function parseNorm(string $xmlString): array {
         $xml = @simplexml_load_string($xmlString);
@@ -69,74 +39,115 @@ class BcnConnector {
             return ['error' => 'Failed to parse XML'];
         }
         
-        // Register namespace
-        $xml->registerXPathNamespace('n', 'http://www.leychile.cl/esquemas');
+        // Detect namespace
+        $namespaces = $xml->getNamespaces(true);
+        $hasNs = !empty($namespaces);
+        $nsPrefix = '';
+        if ($hasNs) {
+            // Register the default namespace
+            $defaultNs = reset($namespaces);
+            $xml->registerXPathNamespace('n', $defaultNs);
+            $nsPrefix = 'n:';
+        }
         
-        // Extract basic identification
+        // Helper: safe xpath that always returns array
+        $xp = function(string $path, $context = null) use ($xml, $nsPrefix) {
+            $node = $context ?? $xml;
+            $result = $node->xpath($path);
+            return is_array($result) ? $result : [];
+        };
+        
+        // Extract basic identification from root attributes
+        // BCN uses PascalCase: NormaId, FechaVersion, Derogado, EsTratado
         $norm = [
-            'id_norma' => (string)$xml['normaId'],
-            'fecha_version' => (string)$xml['fechaVersion'],
-            'derogado' => ((string)$xml['derogado']) === 'derogado',
-            'es_tratado' => ((string)$xml['esTratado']) === 'tratado',
+            'id_norma' => (string)($xml['NormaId'] ?? $xml['normaId'] ?? ''),
+            'fecha_version' => (string)($xml['FechaVersion'] ?? $xml['fechaVersion'] ?? ''),
+            'derogado' => in_array((string)($xml['Derogado'] ?? $xml['derogado'] ?? ''), ['derogado', 'si', 'true']),
+            'es_tratado' => in_array((string)($xml['EsTratado'] ?? $xml['esTratado'] ?? ''), ['tratado', 'si', 'true']),
         ];
         
+        // Try both namespaced and non-namespaced xpath
+        $findNodes = function(string $path, $context = null) use ($xml, $nsPrefix, $xp) {
+            $node = $context ?? $xml;
+            // Try with namespace prefix first
+            if ($nsPrefix) {
+                $result = $xp($path, $node);
+                if (!empty($result)) return $result;
+            }
+            // Try without namespace
+            $plainPath = str_replace($nsPrefix, '', $path);
+            $result = $xp($plainPath, $node);
+            if (!empty($result)) return $result;
+            return [];
+        };
+        
         // Identification
-        $ident = $xml->xpath('//n:Identificador')[0] ?? null;
+        $idents = $findNodes("//{$nsPrefix}Identificador");
+        $ident = $idents[0] ?? null;
         if ($ident) {
-            $norm['fecha_publicacion'] = (string)$ident['fechaPublicacion'];
-            $norm['fecha_promulgacion'] = (string)$ident['fechaPromulgacion'];
+            $norm['fecha_publicacion'] = (string)($ident['FechaPublicacion'] ?? $ident['fechaPublicacion'] ?? '');
+            $norm['fecha_promulgacion'] = (string)($ident['FechaPromulgacion'] ?? $ident['fechaPromulgacion'] ?? '');
             
-            $tipos = $ident->xpath('.//n:TipoNumero');
+            $tipos = $findNodes(".//{$nsPrefix}TipoNumero", $ident);
             if (!empty($tipos)) {
-                $norm['tipo'] = (string)$tipos[0]->xpath('n:Tipo')[0];
-                $norm['numero'] = (string)$tipos[0]->xpath('n:Numero')[0];
+                $tipoNodes = $findNodes("{$nsPrefix}Tipo", $tipos[0]);
+                $numNodes = $findNodes("{$nsPrefix}Numero", $tipos[0]);
+                $norm['tipo'] = !empty($tipoNodes) ? (string)$tipoNodes[0] : null;
+                $norm['numero'] = !empty($numNodes) ? (string)$numNodes[0] : null;
             }
             
-            $orgs = $ident->xpath('.//n:Organismo');
+            $orgs = $findNodes(".//{$nsPrefix}Organismo", $ident);
             $norm['organismo'] = !empty($orgs) ? (string)$orgs[0] : null;
         }
         
         // Metadata
-        $meta = $xml->xpath('//n:Norma/n:Metadatos')[0] ?? null;
-        if (!$meta) {
-            $meta = $xml->xpath('//n:Metadatos')[0] ?? null;
-        }
+        $metas = $findNodes("//{$nsPrefix}Metadatos");
+        $meta = $metas[0] ?? null;
         if ($meta) {
-            $norm['titulo'] = (string)($meta->xpath('n:TituloNorma')[0] ?? '');
+            $titulos = $findNodes("{$nsPrefix}TituloNorma", $meta);
+            $norm['titulo'] = !empty($titulos) ? (string)$titulos[0] : '';
             
-            $materias = $meta->xpath('n:Materias/n:Materia');
+            $materias = $findNodes("{$nsPrefix}Materias/{$nsPrefix}Materia", $meta);
             $norm['materias'] = array_map(function($m) { return (string)$m; }, $materias);
             
-            $nombres = $meta->xpath('n:NombresUsoComun/n:NombreUsoComun');
+            $nombres = $findNodes("{$nsPrefix}NombresUsoComun/{$nsPrefix}NombreUsoComun", $meta);
             $norm['nombres_uso_comun'] = array_map(function($n) { return (string)$n; }, $nombres);
+        } else {
+            $norm['titulo'] = '';
+            $norm['materias'] = [];
+            $norm['nombres_uso_comun'] = [];
         }
         
         // Encabezado (header/preamble)
-        $encab = $xml->xpath('//n:Encabezado')[0] ?? null;
+        $encabs = $findNodes("//{$nsPrefix}Encabezado");
+        $encab = $encabs[0] ?? null;
         if ($encab) {
+            $textos = $findNodes("{$nsPrefix}Texto", $encab);
             $norm['encabezado'] = [
-                'texto' => $this->cleanText((string)($encab->xpath('n:Texto')[0] ?? '')),
-                'fecha_version' => (string)$encab['fechaVersion'],
-                'derogado' => ((string)$encab['derogado']) === 'derogado',
+                'texto' => $this->cleanText(!empty($textos) ? (string)$textos[0] : ''),
+                'fecha_version' => (string)($encab['FechaVersion'] ?? $encab['fechaVersion'] ?? ''),
+                'derogado' => in_array((string)($encab['Derogado'] ?? $encab['derogado'] ?? ''), ['derogado', 'si']),
             ];
         }
         
         // Articles (recursive structure)
         $norm['articles'] = [];
-        $estructuras = $xml->xpath('//n:Norma/n:EstructurasFuncionales/n:EstructuraFuncional');
+        $estructuras = $findNodes("//{$nsPrefix}Norma/{$nsPrefix}EstructurasFuncionales/{$nsPrefix}EstructuraFuncional");
         if (empty($estructuras)) {
-            $estructuras = $xml->xpath('//n:EstructurasFuncionales/n:EstructuraFuncional');
+            $estructuras = $findNodes("//{$nsPrefix}EstructurasFuncionales/{$nsPrefix}EstructuraFuncional");
         }
         
         foreach ($estructuras as $ef) {
-            $norm['articles'][] = $this->parseEstructuraFuncional($ef);
+            $norm['articles'][] = $this->parseEstructuraFuncional($ef, $nsPrefix);
         }
         
         // Promulgación
-        $prom = $xml->xpath('//n:Promulgacion')[0] ?? null;
+        $proms = $findNodes("//{$nsPrefix}Promulgacion");
+        $prom = $proms[0] ?? null;
         if ($prom) {
+            $textos = $findNodes("{$nsPrefix}Texto", $prom);
             $norm['promulgacion'] = [
-                'texto' => $this->cleanText((string)($prom->xpath('n:Texto')[0] ?? '')),
+                'texto' => $this->cleanText(!empty($textos) ? (string)$textos[0] : ''),
             ];
         }
         
@@ -151,67 +162,69 @@ class BcnConnector {
     }
     
     /**
-     * Parse a single EstructuraFuncional (article or grouper) recursively
+     * Parse a single EstructuraFuncional recursively
      */
-    private function parseEstructuraFuncional($ef): array {
+    private function parseEstructuraFuncional($ef, string $nsPrefix = ''): array {
         $item = [
-            'id_parte' => (string)$ef['idParte'],
-            'tipo_parte' => (string)$ef['tipoParte'],
-            'fecha_version' => (string)$ef['fechaVersion'],
-            'derogado' => ((string)$ef['derogado']) === 'derogado',
-            'transitorio' => ((string)$ef['transitorio']) === 'transitorio',
+            'id_parte' => (string)($ef['IdParte'] ?? $ef['idParte'] ?? ''),
+            'tipo_parte' => (string)($ef['TipoParte'] ?? $ef['tipoParte'] ?? ''),
+            'fecha_version' => (string)($ef['FechaVersion'] ?? $ef['fechaVersion'] ?? ''),
+            'derogado' => in_array((string)($ef['Derogado'] ?? $ef['derogado'] ?? ''), ['derogado', 'si']),
+            'transitorio' => in_array((string)($ef['Transitorio'] ?? $ef['transitorio'] ?? ''), ['transitorio', 'si']),
             'texto' => '',
             'nombre_parte' => '',
             'titulo_parte' => '',
             'children' => [],
         ];
         
-        // Text
-        $textoNodes = $ef->xpath('n:Texto');
-        if (!empty($textoNodes)) {
+        // Text - try both namespaced and plain
+        $textoNodes = $ef->xpath("{$nsPrefix}Texto");
+        if (!is_array($textoNodes) || empty($textoNodes)) {
+            $textoNodes = $ef->xpath('Texto');
+        }
+        if (is_array($textoNodes) && !empty($textoNodes)) {
             $item['texto'] = $this->cleanText((string)$textoNodes[0]);
         }
         
         // Metadata
-        $metaNodes = $ef->xpath('n:Metadatos');
-        if (!empty($metaNodes)) {
-            $nombreParte = $metaNodes[0]->xpath('n:NombreParte');
-            if (!empty($nombreParte) && ((string)$nombreParte[0]['presente']) === 'si') {
+        $metaNodes = $ef->xpath("{$nsPrefix}Metadatos");
+        if (!is_array($metaNodes) || empty($metaNodes)) {
+            $metaNodes = $ef->xpath('Metadatos');
+        }
+        if (is_array($metaNodes) && !empty($metaNodes)) {
+            $nombreParte = $metaNodes[0]->xpath("{$nsPrefix}NombreParte");
+            if (!is_array($nombreParte)) $nombreParte = $metaNodes[0]->xpath('NombreParte') ?: [];
+            if (!empty($nombreParte) && in_array((string)($nombreParte[0]['Presente'] ?? $nombreParte[0]['presente'] ?? ''), ['si', 'true'])) {
                 $item['nombre_parte'] = trim((string)$nombreParte[0]);
             }
             
-            $tituloParte = $metaNodes[0]->xpath('n:TituloParte');
-            if (!empty($tituloParte) && ((string)$tituloParte[0]['presente']) === 'si') {
+            $tituloParte = $metaNodes[0]->xpath("{$nsPrefix}TituloParte");
+            if (!is_array($tituloParte)) $tituloParte = $metaNodes[0]->xpath('TituloParte') ?: [];
+            if (!empty($tituloParte) && in_array((string)($tituloParte[0]['Presente'] ?? $tituloParte[0]['presente'] ?? ''), ['si', 'true'])) {
                 $item['titulo_parte'] = trim((string)$tituloParte[0]);
             }
         }
         
-        // Nested structures (for groupers like Título, Capítulo, etc.)
-        $children = $ef->xpath('n:EstructurasFuncionales/n:EstructuraFuncional');
+        // Nested structures
+        $children = $ef->xpath("{$nsPrefix}EstructurasFuncionales/{$nsPrefix}EstructuraFuncional");
+        if (!is_array($children) || empty($children)) {
+            $children = $ef->xpath('EstructurasFuncionales/EstructuraFuncional') ?: [];
+        }
         foreach ($children as $child) {
-            $item['children'][] = $this->parseEstructuraFuncional($child);
+            $item['children'][] = $this->parseEstructuraFuncional($child, $nsPrefix);
         }
         
         return $item;
     }
     
-    /**
-     * Clean text from XML artifacts
-     */
     private function cleanText(string $text): string {
-        // Decode XML entities
         $text = html_entity_decode($text, ENT_QUOTES | ENT_XML1, 'UTF-8');
-        // Remove non-breaking spaces
         $text = str_replace("\xC2\xA0", ' ', $text);
-        // Normalize whitespace but preserve paragraph breaks
         $text = preg_replace('/[ \t]+/', ' ', $text);
         $text = preg_replace('/\n{3,}/', "\n\n", $text);
         return trim($text);
     }
     
-    /**
-     * Compute hash of all article texts for change detection
-     */
     private function computeTextHash(array $norm): string {
         $allText = '';
         foreach ($norm['articles'] as $art) {
@@ -228,16 +241,12 @@ class BcnConnector {
         return $text;
     }
     
-    /**
-     * HTTP fetch with retry logic
-     */
     private function fetchWithRetry(string $url): array {
         $lastError = null;
+        $httpCode = 0;
         
         for ($attempt = 0; $attempt <= self::MAX_RETRIES; $attempt++) {
-            if ($attempt > 0) {
-                sleep(self::RETRY_DELAY);
-            }
+            if ($attempt > 0) sleep(self::RETRY_DELAY);
             
             $ch = curl_init($url);
             curl_setopt_array($ch, [
@@ -246,9 +255,7 @@ class BcnConnector {
                 CURLOPT_TIMEOUT => 30,
                 CURLOPT_CONNECTTIMEOUT => 10,
                 CURLOPT_USERAGENT => self::USER_AGENT,
-                CURLOPT_HTTPHEADER => [
-                    'Accept: text/xml, application/xml, */*',
-                ],
+                CURLOPT_HTTPHEADER => ['Accept: text/xml, application/xml, */*'],
             ]);
             
             $response = curl_exec($ch);
@@ -256,18 +263,13 @@ class BcnConnector {
             $curlError = curl_error($ch);
             curl_close($ch);
             
-            if ($curlError) {
-                $lastError = "cURL error: $curlError";
-                continue;
-            }
-            
+            if ($curlError) { $lastError = "cURL: $curlError"; continue; }
             if ($httpCode === 200 && !empty($response)) {
                 return ['xml' => $response, 'http_code' => $httpCode, 'error' => null];
             }
-            
-            $lastError = "HTTP $httpCode" . (empty($response) ? ' (empty response)' : '');
+            $lastError = "HTTP $httpCode" . (empty($response) ? ' (empty)' : '');
         }
         
-        return ['xml' => '', 'http_code' => $httpCode ?? 0, 'error' => $lastError];
+        return ['xml' => '', 'http_code' => $httpCode, 'error' => $lastError];
     }
 }
