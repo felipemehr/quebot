@@ -99,6 +99,88 @@ function sanitizeUtf8(string $text): string {
 }
 
 /**
+ * Build profile context string for Claude's system prompt.
+ * Only includes fields with actual data.
+ */
+function buildProfileContext(?array $profile): string {
+    if (empty($profile)) return '';
+
+    $lines = [];
+
+    $locs = $profile['locations'] ?? [];
+    if (!empty($locs)) {
+        $lines[] = "- Zonas de interés: " . implode(', ', $locs);
+    }
+
+    $types = $profile['property_types'] ?? [];
+    if (!empty($types)) {
+        $lines[] = "- Busca: " . implode(', ', $types);
+    }
+
+    $bed = $profile['bedrooms'] ?? null;
+    $bath = $profile['bathrooms'] ?? null;
+    if ($bed || $bath) {
+        $parts = [];
+        if ($bed) $parts[] = "{$bed} dormitorios";
+        if ($bath) $parts[] = "{$bath} baños";
+        $lines[] = "- Requerimiento: " . implode(', ', $parts);
+    }
+
+    $budget = $profile['budget'] ?? [];
+    if (!empty($budget)) {
+        $min = $budget['min'] ?? null;
+        $max = $budget['max'] ?? null;
+        $unit = $budget['unit'] ?? 'UF';
+        if ($max) {
+            $budgetStr = $min ? "{$min}-{$max} {$unit}" : "hasta {$max} {$unit}";
+            $lines[] = "- Presupuesto: {$budgetStr}";
+        }
+    }
+
+    $area = $profile['min_area_m2'] ?? null;
+    if ($area) {
+        $lines[] = "- Superficie mínima: {$area} m²";
+    }
+
+    $purpose = $profile['purpose'] ?? null;
+    if ($purpose) {
+        $lines[] = "- Propósito: {$purpose}";
+    }
+
+    $family = $profile['family_info'] ?? [];
+    if (!empty($family)) {
+        $size = $family['size'] ?? null;
+        $ages = $family['children_ages'] ?? [];
+        if ($size) {
+            $familyStr = "Familia de {$size}";
+            if (!empty($ages)) {
+                $familyStr .= " (hijos: " . implode(', ', $ages) . " años)";
+            }
+            $lines[] = "- Familia: {$familyStr}";
+        }
+    }
+
+    $reqs = $profile['key_requirements'] ?? [];
+    if (!empty($reqs)) {
+        $lines[] = "- Necesidades: " . implode(', ', $reqs);
+    }
+
+    $exp = $profile['experience'] ?? null;
+    if ($exp) {
+        $lines[] = "- Experiencia: {$exp}";
+    }
+
+    if (empty($lines)) return '';
+
+    $context = "\n\n👤 PERFIL DEL USUARIO (aprendido de conversaciones anteriores):\n";
+    $context .= implode("\n", $lines) . "\n";
+    $context .= "Usa esta información para personalizar búsquedas y recomendaciones. ";
+    $context .= "No repitas preguntas sobre datos que ya conoces.\n";
+
+    return $context;
+}
+
+/**
  * POST-PROCESS URL VALIDATOR
  * 
  * Catches fabricated URLs in Claude's response by comparing against
@@ -296,7 +378,7 @@ try {
 $ragEndTime = microtime(true);
 
 // --- Build messages for Claude ---
-$systemPrompt = SYSTEM_PROMPT . $ufContext;
+$systemPrompt = SYSTEM_PROMPT . $ufContext . buildProfileContext($userProfile);
 
 $messages = [];
 
