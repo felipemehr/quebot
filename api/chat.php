@@ -4,9 +4,15 @@ require_once __DIR__ . '/search.php';
 require_once __DIR__ . '/../services/legal/LegalSearch.php';
 
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+
+// === CORS VALIDATION ===
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (in_array($origin, ALLOWED_ORIGINS)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+}
+// If origin not in allowlist, no CORS headers → browser blocks response
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -28,6 +34,54 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+// === RATE LIMITING (file-based with flock) ===
+function checkRateLimit(string $identifier): bool {
+    $dir = sys_get_temp_dir() . '/quebot_ratelimit';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    
+    $file = $dir . '/' . md5($identifier);
+    $now = time();
+    $window = 60; // 1 minute
+    
+    $fp = @fopen($file, 'c+');
+    if (!$fp) return true; // fail open — don't block on filesystem errors
+    
+    flock($fp, LOCK_EX);
+    $content = stream_get_contents($fp);
+    $timestamps = $content ? (json_decode($content, true) ?: []) : [];
+    
+    // Remove entries older than window
+    $timestamps = array_values(array_filter($timestamps, fn($t) => $t > $now - $window));
+    
+    if (count($timestamps) >= RATE_LIMIT_PER_MINUTE) {
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        return false;
+    }
+    
+    $timestamps[] = $now;
+    ftruncate($fp, 0);
+    rewind($fp);
+    fwrite($fp, json_encode($timestamps));
+    flock($fp, LOCK_UN);
+    fclose($fp);
+    return true;
+}
+
+// Determine rate limit identifier (IP or forwarded IP)
+$clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+// Take first IP if comma-separated (X-Forwarded-For can have multiple)
+$clientIp = trim(explode(',', $clientIp)[0]);
+
+if (!checkRateLimit($clientIp)) {
+    http_response_code(429);
+    echo json_encode(['error' => 'Rate limit exceeded. Max ' . RATE_LIMIT_PER_MINUTE . ' requests per minute.']);
+    exit;
+}
+
+// === START TIMING ===
+$startTime = microtime(true);
+
 $input = json_decode(file_get_contents('php://input'), true);
 $message = $input['message'] ?? '';
 $conversationHistory = $input['history'] ?? [];
@@ -44,9 +98,7 @@ if (empty($message)) {
  * Sanitize text for JSON encoding - remove invalid UTF-8 sequences
  */
 function sanitizeUtf8(string $text): string {
-    // Remove invalid UTF-8 sequences
     $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
-    // Remove null bytes and other control characters (keep newlines/tabs)
     $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
     return $text;
 }
@@ -120,6 +172,7 @@ if ($ufData) {
 
 // --- Perform web search if needed ---
 $searchContext = '';
+$ragStartTime = microtime(true);
 if ($shouldSearch) {
     $results = searchDuckDuckGo($searchQuery);
     
@@ -162,6 +215,7 @@ try {
 } catch (Exception $e) {
     error_log("Legal search failed: " . $e->getMessage());
 }
+$ragEndTime = microtime(true);
 
 // --- Build messages for Claude ---
 $systemPrompt = SYSTEM_PROMPT . $ufContext;
@@ -193,6 +247,8 @@ $messages[] = [
 ];
 
 // --- Call Claude API ---
+$llmStartTime = microtime(true);
+
 $apiData = [
     'model' => MODEL,
     'max_tokens' => MAX_TOKENS,
@@ -225,6 +281,8 @@ $response = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 
+$llmEndTime = microtime(true);
+
 if ($httpCode !== 200) {
     http_response_code(500);
     echo json_encode(['error' => 'API error', 'details' => $response]);
@@ -234,11 +292,32 @@ if ($httpCode !== 200) {
 $data = json_decode($response, true);
 $reply = $data['content'][0]['text'] ?? 'Sin respuesta';
 
+// === TIMING & METADATA ===
+$endTime = microtime(true);
+$timingTotal = round(($endTime - $startTime) * 1000);
+$timingRag = round(($ragEndTime - $ragStartTime) * 1000);
+$timingLlm = round(($llmEndTime - $llmStartTime) * 1000);
+
+$inputTokens = $data['usage']['input_tokens'] ?? 0;
+$outputTokens = $data['usage']['output_tokens'] ?? 0;
+
+// Cost estimate (Claude Sonnet pricing: $3/MTok input, $15/MTok output)
+$costEstimate = ($inputTokens * 3 / 1000000) + ($outputTokens * 15 / 1000000);
+
 echo json_encode([
     'response' => $reply,
     'searched' => $shouldSearch,
     'searchQuery' => $shouldSearch ? $searchQuery : null,
     'ufValue' => $ufData ? $ufData['formatted'] : null,
-    'legalResults' => !empty($legalContext)
+    'legalResults' => !empty($legalContext),
+    'metadata' => [
+        'model' => MODEL,
+        'input_tokens' => $inputTokens,
+        'output_tokens' => $outputTokens,
+        'cost_estimate' => round($costEstimate, 6),
+        'timing_total' => $timingTotal,
+        'timing_rag' => $timingRag,
+        'timing_llm' => $timingLlm
+    ]
 ], JSON_UNESCAPED_UNICODE);
 ?>

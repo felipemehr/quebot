@@ -11,11 +11,9 @@ const API = {
      */
     async sendMessage(messages, onChunk, onComplete, onError, userContext = '') {
         try {
-            // Get the last message content for the API
             const lastMessage = messages[messages.length - 1];
             const history = messages.slice(0, -1);
 
-            // Get user context from Firebase auth if available
             let context = userContext;
             if (typeof queBotAuth !== 'undefined' && queBotAuth.initialized) {
                 context = queBotAuth.getUserContext();
@@ -47,15 +45,19 @@ const API = {
                 throw new Error(data.error);
             }
 
-            // Handle response with optional visualization
             const textContent = data.response || data.content || '';
             const vizData = data.visualization || null;
+
+            // Extract metadata for run tracking
+            const metadata = data.metadata || {};
+            metadata.searched = data.searched || false;
+            metadata.legal_used = data.legalResults || false;
 
             // Call chunk callback with full content
             onChunk(textContent, textContent, vizData);
             
-            // Call complete callback with content and viz data
-            onComplete(textContent, vizData);
+            // Call complete callback with content, viz data, and metadata
+            onComplete(textContent, vizData, metadata);
 
         } catch (error) {
             console.error('API Error:', error);
