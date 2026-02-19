@@ -119,6 +119,9 @@ const App = {
             });
         });
 
+        // B3: Personalize action cards with user profile
+        this.personalizeActionCards();
+
         // Chat history clicks
         UI.elements.chatHistory.addEventListener('click', (e) => {
             const historyItem = e.target.closest('.history-item');
@@ -317,6 +320,75 @@ const App = {
     /**
      * Enviar mensaje
      */
+
+    /**
+     * B3: Personalize action cards based on user's search profile.
+     * Called on init and when profile updates.
+     */
+    personalizeActionCards() {
+        const profile = (typeof queBotAuth !== 'undefined') ? queBotAuth.getSearchProfile() : null;
+        if (!profile) return;
+
+        // --- Property card ---
+        const propertyCard = document.querySelector('.action-card[data-card-type="property"]');
+        if (propertyCard) {
+            const locations = profile.locations || [];
+            const types = profile.property_types || [];
+            const budget = profile.budget || {};
+            
+            if (locations.length > 0 || types.length > 0) {
+                // Build personalized prompt
+                const parts = [];
+                if (types.length > 0) {
+                    parts.push(types.slice(0, 2).join(' o '));
+                } else {
+                    parts.push('propiedades');
+                }
+                if (locations.length > 0) {
+                    parts.push('en ' + locations.slice(0, 2).join(' y '));
+                }
+                
+                let prompt = 'Busca ' + parts.join(' ');
+                
+                // Add budget hint if available
+                if (budget.max) {
+                    const unit = budget.unit || 'UF';
+                    prompt += ' hasta ' + budget.max.toLocaleString('es-CL') + ' ' + unit;
+                }
+
+                // Update card
+                propertyCard.dataset.prompt = prompt;
+                const label = propertyCard.querySelector('.action-card-label');
+                if (label) {
+                    // Short label for the card
+                    let shortLabel = '';
+                    if (types.length > 0) {
+                        const typeNames = {
+                            'parcela': 'Parcelas',
+                            'casa': 'Casas',
+                            'departamento': 'Deptos',
+                            'terreno': 'Terrenos',
+                            'oficina': 'Oficinas'
+                        };
+                        shortLabel = types.map(t => typeNames[t] || t).slice(0, 2).join(' y ');
+                    } else {
+                        shortLabel = 'Propiedades';
+                    }
+                    if (locations.length > 0) {
+                        shortLabel += ' en ' + locations[0];
+                    }
+                    label.textContent = shortLabel;
+                }
+            }
+        }
+
+        // --- Prices card: could personalize with UF preferences ---
+        // (future: if profile shows interest in specific currencies)
+
+        // --- News card: could personalize with UF preferences ---
+        // (future: "Noticias inmobiliarias en Temuco")
+    },
+
     async sendMessage() {
         const content = UI.elements.messageInput.value.trim();
         if (!content || this.isProcessing) return;
@@ -442,6 +514,7 @@ const App = {
                 // Save search profile if backend extracted new preferences
                 if (metadata && metadata.profile_update) {
                     queBotAuth.saveSearchProfile(metadata.profile_update);
+                    this.personalizeActionCards();
                 }
 
         
