@@ -76,6 +76,9 @@ class QueBotAuth {
       const result = await this.auth.signInWithPopup(provider);
       this.currentUser = result.user;
       
+      // Close modal immediately after successful login
+      this.hideAuthModal();
+      
       // Create/update full user profile
       await this.saveUserProfile({
         level: USER_LEVEL.FULL,
