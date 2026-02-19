@@ -12,7 +12,6 @@ if (in_array($origin, ALLOWED_ORIGINS)) {
     header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type');
 }
-// If origin not in allowlist, no CORS headers → browser blocks response
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -41,16 +40,15 @@ function checkRateLimit(string $identifier): bool {
     
     $file = $dir . '/' . md5($identifier);
     $now = time();
-    $window = 60; // 1 minute
+    $window = 60;
     
     $fp = @fopen($file, 'c+');
-    if (!$fp) return true; // fail open — don't block on filesystem errors
+    if (!$fp) return true;
     
     flock($fp, LOCK_EX);
     $content = stream_get_contents($fp);
     $timestamps = $content ? (json_decode($content, true) ?: []) : [];
     
-    // Remove entries older than window
     $timestamps = array_values(array_filter($timestamps, fn($t) => $t > $now - $window));
     
     if (count($timestamps) >= RATE_LIMIT_PER_MINUTE) {
@@ -68,9 +66,7 @@ function checkRateLimit(string $identifier): bool {
     return true;
 }
 
-// Determine rate limit identifier (IP or forwarded IP)
 $clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-// Take first IP if comma-separated (X-Forwarded-For can have multiple)
 $clientIp = trim(explode(',', $clientIp)[0]);
 
 if (!checkRateLimit($clientIp)) {
@@ -94,13 +90,99 @@ if (empty($message)) {
     exit;
 }
 
-/**
- * Sanitize text for JSON encoding - remove invalid UTF-8 sequences
- */
 function sanitizeUtf8(string $text): string {
     $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
     $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
     return $text;
+}
+
+/**
+ * POST-PROCESS URL VALIDATOR
+ * 
+ * Catches fabricated URLs in Claude's response by comparing against
+ * the actual URLs from search results. This is the safety net that
+ * catches fabrication even when prompt instructions fail.
+ * 
+ * Strategy:
+ * - Extract all markdown links [text](url) from response
+ * - Check each URL against the whitelist from search results
+ * - Allow: search result URLs, homepage URLs, legal/government sites
+ * - Replace: any deep link NOT in search results → domain homepage
+ */
+function validateResponseURLs(string $response, array $allowedURLs): array {
+    $fabricatedCount = 0;
+    
+    // Normalize allowed URLs for comparison
+    $normalizedAllowed = [];
+    foreach ($allowedURLs as $url) {
+        $normalizedAllowed[] = rtrim($url, '/');
+    }
+    
+    // Safe domains where any URL is OK (legal, government)
+    $alwaysSafeDomains = [
+        'leychile.cl', 'bcn.cl', 'sii.cl', 'contraloria.cl',
+        'diariooficial.interior.gob.cl', 'pjud.cl', 'minvu.gob.cl',
+        'mop.gob.cl', 'dga.mop.gob.cl', 'tesoreria.cl',
+        'google.com', 'maps.google.com'
+    ];
+    
+    // Find all markdown links: [text](url)
+    $pattern = '/\[([^\]]*)\]\((https?:\/\/[^\)]+)\)/';
+    
+    $response = preg_replace_callback($pattern, function($match) use ($normalizedAllowed, $alwaysSafeDomains, &$fabricatedCount) {
+        $linkText = $match[1];
+        $url = $match[2];
+        $normalizedUrl = rtrim($url, '/');
+        
+        // 1. URL is in the search results whitelist → OK
+        if (in_array($normalizedUrl, $normalizedAllowed)) {
+            return $match[0]; // Keep as-is
+        }
+        
+        // 2. Parse the URL
+        $host = parse_url($url, PHP_URL_HOST);
+        $path = parse_url($url, PHP_URL_PATH);
+        
+        if (!$host) return $match[0]; // Malformed, leave it
+        
+        // 3. Homepage / root URL → OK (recommending a portal)
+        if (empty($path) || $path === '/' || $path === '') {
+            return $match[0];
+        }
+        
+        // 4. Always-safe domain (legal, government) → OK
+        foreach ($alwaysSafeDomains as $safe) {
+            if (str_contains($host, $safe)) {
+                return $match[0];
+            }
+        }
+        
+        // 5. Check if it's a partial match (URL starts with an allowed URL)
+        // This handles cases where search result is a listing page and link is to same page with anchor
+        foreach ($normalizedAllowed as $allowed) {
+            if (str_starts_with($normalizedUrl, $allowed)) {
+                return $match[0];
+            }
+        }
+        
+        // 6. THIS URL IS FABRICATED — replace with domain homepage
+        $fabricatedCount++;
+        $scheme = parse_url($url, PHP_URL_SCHEME) ?? 'https';
+        $safeUrl = "{$scheme}://{$host}";
+        
+        error_log("URL fabricada detectada y reemplazada: {$url} → {$safeUrl}");
+        
+        return "[{$linkText}]({$safeUrl})";
+    }, $response);
+    
+    // Also catch bare URLs that aren't in markdown links
+    // Pattern: URLs not inside parentheses (already handled above)
+    // We focus on markdown links since that's how Claude formats them
+    
+    return [
+        'response' => $response,
+        'fabricated_count' => $fabricatedCount
+    ];
 }
 
 // --- Determine if we should search ---
@@ -110,14 +192,12 @@ $searchQuery = $message;
 $messageWords = str_word_count($message);
 $messageLower = mb_strtolower($message);
 
-// Typo patterns - NOT search triggers
 $typoPatterns = ['/^ylo\b/', '/^ylos\b/', '/^yla\b/', '/^ysus\b/'];
 $isTypo = false;
 foreach ($typoPatterns as $tp) {
     if (preg_match($tp, $messageLower)) $isTypo = true;
 }
 
-// Follow-up patterns - repeat previous search
 $followUpPatterns = ['busca otra vez', 'repite', 'repítelo', 'busca de nuevo', 'otra vez', 'intenta de nuevo', 'vuelve a buscar'];
 $isFollowUp = false;
 foreach ($followUpPatterns as $fp) {
@@ -137,7 +217,6 @@ foreach ($followUpPatterns as $fp) {
     }
 }
 
-// Short messages (1-2 words) - don't search
 if (!$isFollowUp && !$isTypo && $messageWords >= 3) {
     $searchKeywords = ['busca', 'buscar', 'encuentra', 'encontrar', 'dónde', 'donde', 'cuánto', 'cuanto', 
                        'precio', 'costo', 'valor', 'noticias', 'clima', 'tiempo', 'dólar', 'uf ',
@@ -174,17 +253,16 @@ if ($ufData) {
 $searchContext = '';
 $searchVertical = null;
 $searchProviderUsed = null;
+$searchValidURLs = []; // URLs allowed in response
 $ragStartTime = microtime(true);
 
 if ($shouldSearch) {
     try {
         $orchestrator = new SearchOrchestrator(CLAUDE_API_KEY, false);
 
-        // Auto-detect vertical from search query
         $vertical = DomainPolicy::detectVertical($searchQuery);
         $isPropertyQuery = ($vertical === 'real_estate');
 
-        // Configure scraping based on vertical
         $options = [
             'max_results' => 10,
             'scrape_pages' => $isPropertyQuery ? 5 : 3,
@@ -193,13 +271,12 @@ if ($shouldSearch) {
 
         $searchResult = $orchestrator->search($searchQuery, $vertical, $options);
 
-        // Use pre-built context for LLM
         $searchContext = $searchResult['context_for_llm'] ?? '';
         $searchVertical = $searchResult['vertical'] ?? null;
         $searchProviderUsed = $searchResult['provider_used'] ?? null;
+        $searchValidURLs = $searchResult['valid_urls'] ?? [];
     } catch (\Throwable $e) {
         error_log("SearchOrchestrator error: " . $e->getMessage());
-        // Fallback: no search context (don't crash the chat)
         $searchContext = "\n\n🔍 BÚSQUEDA para \"{$searchQuery}\": Error en la búsqueda. Informa al usuario que hubo un problema técnico buscando y sugiere buscar directamente en portalinmobiliario.com, yapo.cl, toctoc.com\n";
     }
 }
@@ -231,7 +308,6 @@ foreach ($history as $msg) {
     }
 }
 
-// Add current message with search + legal context
 $userMessage = $message;
 if (!empty($searchContext)) {
     $userMessage .= $searchContext;
@@ -291,6 +367,18 @@ if ($httpCode !== 200) {
 $data = json_decode($response, true);
 $reply = $data['content'][0]['text'] ?? 'Sin respuesta';
 
+// === POST-PROCESS: VALIDATE URLs IN RESPONSE ===
+$fabricatedCount = 0;
+if ($shouldSearch && !empty($searchValidURLs)) {
+    $validation = validateResponseURLs($reply, $searchValidURLs);
+    $reply = $validation['response'];
+    $fabricatedCount = $validation['fabricated_count'];
+    
+    if ($fabricatedCount > 0) {
+        error_log("⚠️ URLs fabricadas detectadas y corregidas: {$fabricatedCount}");
+    }
+}
+
 // === TIMING & METADATA ===
 $endTime = microtime(true);
 $timingTotal = round(($endTime - $startTime) * 1000);
@@ -300,7 +388,6 @@ $timingLlm = round(($llmEndTime - $llmStartTime) * 1000);
 $inputTokens = $data['usage']['input_tokens'] ?? 0;
 $outputTokens = $data['usage']['output_tokens'] ?? 0;
 
-// Cost estimate (Claude Sonnet pricing: $3/MTok input, $15/MTok output)
 $costEstimate = ($inputTokens * 3 / 1000000) + ($outputTokens * 15 / 1000000);
 
 echo json_encode([
@@ -318,7 +405,8 @@ echo json_encode([
         'cost_estimate' => round($costEstimate, 6),
         'timing_total' => $timingTotal,
         'timing_rag' => $timingRag,
-        'timing_llm' => $timingLlm
+        'timing_llm' => $timingLlm,
+        'fabricated_urls_caught' => $fabricatedCount
     ]
 ], JSON_UNESCAPED_UNICODE);
 ?>

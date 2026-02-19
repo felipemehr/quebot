@@ -3,9 +3,6 @@
  * Search Orchestrator v1.
  * 
  * Pipeline: QueryBuilder → Cache check → Provider search → Validate → Scrape → Rank → (LLM Rerank) → Cache store → Return
- *
- * Returns normalized results with extracted data, scores, and a pre-built
- * context string for the LLM.
  */
 
 require_once __DIR__ . '/QueryBuilder.php';
@@ -28,10 +25,8 @@ class SearchOrchestrator {
         $this->claudeApiKey = $claudeApiKey;
         $this->llmRerankEnabled = $llmRerankEnabled;
 
-        // Register default provider
         $this->registerProvider(new DuckDuckGoHtmlProvider());
 
-        // Auto-register SERP API if key is available
         $serpApiKey = getenv('SERPAPI_KEY') ?: '';
         if (!empty($serpApiKey)) {
             $serpProvider = new SerpApiProvider($serpApiKey);
@@ -45,47 +40,22 @@ class SearchOrchestrator {
         $this->providers[$provider->getName()] = $provider;
     }
 
-    /**
-     * Get a registered provider by name.
-     */
     public function getProvider(string $name): ?object {
         return $this->providers[$name] ?? null;
     }
 
-    /**
-     * Get the preferred provider for a vertical.
-     * If SERP API is registered, prefer it for news, retail, real_estate.
-     * DuckDuckGo is fallback for everything.
-     */
     public function getPreferredProvider(string $vertical): object {
-        // If SERP API is registered and available, prefer it for certain verticals
         if (isset($this->providers['serpapi'])) {
             $serpVerticals = ['news', 'retail', 'real_estate'];
             if (in_array($vertical, $serpVerticals)) {
                 return $this->providers['serpapi'];
             }
         }
-        // Default to DuckDuckGo
         return $this->providers['duckduckgo'] ?? reset($this->providers);
     }
 
     /**
      * Main search method.
-     *
-     * @param string $userMessage  Raw user message
-     * @param string $vertical     'auto', 'real_estate', 'legal', 'news', 'retail', 'general'
-     * @param array  $options      Additional options: max_results, scrape_pages, scrape_max_length
-     *
-     * @return array{
-     *   results: array,
-     *   vertical: string,
-     *   queries_used: string[],
-     *   provider_used: string,
-     *   cached: bool,
-     *   total_results: int,
-     *   context_for_llm: string,
-     *   timing_ms: float
-     * }
      */
     public function search(string $userMessage, string $vertical = 'auto', array $options = []): array {
         $startTime = microtime(true);
@@ -94,13 +64,11 @@ class SearchOrchestrator {
         $scrapePages = $options['scrape_pages'] ?? 5;
         $scrapeMaxLen = $options['scrape_max_length'] ?? 5000;
 
-        // 1) Build queries
         $queryData = QueryBuilder::build($userMessage, $vertical);
         $vertical = $queryData['vertical'];
         $queries = $queryData['queries'];
         $cleanedQuery = $queryData['cleaned_query'];
 
-        // 2) Check cache (use first query as cache key)
         $cacheKey = $queries[0] ?? $cleanedQuery;
         $cached = $this->cache->get($vertical, $cacheKey);
         if ($cached !== null) {
@@ -109,11 +77,9 @@ class SearchOrchestrator {
             return $cached;
         }
 
-        // 3) Select provider
         $provider = $this->getPreferredProvider($vertical);
         $providerName = $provider->getName();
 
-        // 4) Execute queries and merge
         $allResults = [];
         $seenUrls = [];
         foreach ($queries as $q) {
@@ -127,7 +93,6 @@ class SearchOrchestrator {
             }
         }
 
-        // 4b) If primary provider returned nothing, try DuckDuckGo fallback
         if (empty($allResults) && $providerName !== 'duckduckgo' && isset($this->providers['duckduckgo'])) {
             $provider = $this->providers['duckduckgo'];
             $providerName = 'duckduckgo (fallback)';
@@ -143,33 +108,29 @@ class SearchOrchestrator {
             }
         }
 
-        // 5) Validate each result (extract price, area, etc.)
         $validated = array_map([Validator::class, 'extract'], $allResults);
 
-        // 6) Scrape top pages for content
         $scraped = 0;
         foreach ($validated as &$r) {
             if ($scraped >= $scrapePages) break;
 
-            // Prioritize specific URLs and whitelisted domains
             $shouldScrape = false;
             $urlType = $r['extracted']['url_type'] ?? 'unknown';
 
             if ($vertical === 'real_estate') {
-                $shouldScrape = true; // Scrape all for property searches
+                $shouldScrape = true;
             } elseif ($urlType === 'specific') {
                 $shouldScrape = true;
             } elseif (DomainPolicy::isWhitelisted($r['url'] ?? '')) {
                 $shouldScrape = true;
             } elseif ($scraped < 3) {
-                $shouldScrape = true; // Scrape first 3 regardless
+                $shouldScrape = true;
             }
 
             if ($shouldScrape) {
                 $content = $provider->scrapeContent($r['url'] ?? '', $scrapeMaxLen);
                 if ($content) {
                     $r['scraped_content'] = $content;
-                    // Re-extract with scraped content
                     $r = Validator::extract($r);
                     $scraped++;
                 }
@@ -177,21 +138,24 @@ class SearchOrchestrator {
         }
         unset($r);
 
-        // 7) Rank results
         $ranked = HeuristicRanker::rank($validated, $cleanedQuery, $vertical);
 
-        // 8) Optional LLM rerank
         if ($this->llmRerankEnabled && $this->claudeApiKey && HeuristicRanker::needsLLMRerank($ranked)) {
             $ranked = LLMReranker::rerank($ranked, $cleanedQuery, $vertical, $this->claudeApiKey);
         }
 
-        // 9) Limit results
         $ranked = array_slice($ranked, 0, $maxResults);
 
-        // 10) Build LLM context
+        // Collect all valid URLs from results
+        $validURLs = [];
+        foreach ($ranked as $r) {
+            if (!empty($r['url'])) {
+                $validURLs[] = $r['url'];
+            }
+        }
+
         $contextForLLM = $this->buildLLMContext($ranked, $userMessage, $vertical);
 
-        // 11) Build response
         $response = [
             'results' => $this->cleanResultsForOutput($ranked),
             'vertical' => $vertical,
@@ -200,10 +164,10 @@ class SearchOrchestrator {
             'cached' => false,
             'total_results' => count($ranked),
             'context_for_llm' => $contextForLLM,
+            'valid_urls' => $validURLs,
             'timing_ms' => round((microtime(true) - $startTime) * 1000, 1),
         ];
 
-        // 12) Cache
         $this->cache->set($vertical, $cacheKey, $response);
 
         return $response;
@@ -211,6 +175,7 @@ class SearchOrchestrator {
 
     /**
      * Build pre-formatted context string for Claude.
+     * Includes explicit URL whitelist to prevent fabrication.
      */
     private function buildLLMContext(array $results, string $query, string $vertical): string {
         if (empty($results)) {
@@ -220,9 +185,10 @@ class SearchOrchestrator {
         }
 
         $ctx = "\n\n🔍 RESULTADOS DE BÚSQUEDA para \"{$query}\" (vertical: {$vertical}):\n";
-        $ctx .= "⚠️ INSTRUCCIÓN: Los siguientes son TODOS los resultados encontrados. "
-              . "NO agregues propiedades, precios, sectores ni datos que NO estén aquí. "
-              . "Si necesitas más datos, di que no los encontraste.\n\n";
+        $ctx .= "⛔ REGLA ABSOLUTA: Solo puedes usar URLs que aparezcan LITERALMENTE abajo. "
+              . "NO construyas URLs. NO inventes slugs. NO combines dominios con paths inventados.\n\n";
+
+        $urlList = [];
 
         foreach ($results as $i => $r) {
             $num = $i + 1;
@@ -239,7 +205,6 @@ class SearchOrchestrator {
                 $ctx .= "   Extracto: {$r['snippet']}\n";
             }
 
-            // Show extracted data
             $ext = $r['extracted'] ?? [];
             $dataPoints = [];
             if (!empty($ext['price_uf'])) $dataPoints[] = "Precio: UF " . number_format($ext['price_uf'], 0, ',', '.');
@@ -253,25 +218,33 @@ class SearchOrchestrator {
                 $ctx .= "   📊 Datos extraídos: " . implode(' | ', $dataPoints) . "\n";
             }
 
-            // Scraped content (truncated for LLM)
             if (!empty($r['scraped_content'])) {
                 $content = substr($r['scraped_content'], 0, 2000);
                 $ctx .= "   📄 Contenido: {$content}\n";
             }
 
             $ctx .= "\n";
+            $urlList[] = $r['url'];
         }
 
-        $ctx .= "⚠️ FIN DE RESULTADOS. Toda información en tu respuesta DEBE provenir "
+        // === EXPLICIT URL WHITELIST ===
+        $ctx .= "═══════════════════════════════════════════\n";
+        $ctx .= "📋 URLS PERMITIDAS (las ÚNICAS que puedes usar como links):\n";
+        foreach ($urlList as $i => $url) {
+            $ctx .= "  " . ($i + 1) . ". {$url}\n";
+        }
+        $ctx .= "\n⛔ CUALQUIER URL QUE NO ESTÉ EN ESTA LISTA = FABRICACIÓN = FALLO DEL SISTEMA\n";
+        $ctx .= "⛔ NO construyas URLs tipo yapo.cl/temuco/casas_venta/nombre-inventado-12345.htm\n";
+        $ctx .= "⛔ Si necesitas recomendar un portal, usa SOLO el dominio: yapo.cl, portalinmobiliario.com\n";
+        $ctx .= "═══════════════════════════════════════════\n";
+
+        $ctx .= "\n⚠️ FIN DE RESULTADOS. Toda información en tu respuesta DEBE provenir "
               . "exclusivamente de los datos anteriores. Si el usuario pidió algo que no "
               . "aparece aquí, dilo explícitamente. NO inventes datos adicionales.\n";
 
         return $ctx;
     }
 
-    /**
-     * Clean results for JSON API output (remove scraped_content to reduce size).
-     */
     private function cleanResultsForOutput(array $results): array {
         return array_map(function ($r) {
             unset($r['scraped_content']);
