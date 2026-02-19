@@ -4,6 +4,9 @@ require_once __DIR__ . '/DomainPolicy.php';
 /**
  * Builds optimized search queries per vertical.
  * Cleans user input, expands abbreviations, generates multi-query sets.
+ *
+ * NOTE: Does NOT use site: operator — DuckDuckGo HTML doesn't support it.
+ * Instead uses domain names as query hints.
  */
 class QueryBuilder {
 
@@ -90,37 +93,38 @@ class QueryBuilder {
         return $query;
     }
 
+    /**
+     * Real estate queries — use portal names as search hints (no site: operator).
+     */
     private static function buildRealEstateQueries(string $cleaned): array {
         $queries = [];
 
         // Query 1: Direct + "venta"
         $queries[] = $cleaned . ' venta';
 
-        // Query 2: Site-specific (portalinmobiliario)
-        $queries[] = $cleaned . ' site:portalinmobiliario.com';
+        // Query 2: Portal-specific hint (portalinmobiliario)
+        $queries[] = $cleaned . ' portalinmobiliario.com';
 
         // Query 3: Alternative portals
-        $queries[] = $cleaned . ' site:toctoc.com OR site:goplaceit.com';
+        $queries[] = $cleaned . ' toctoc.com goplaceit.com';
 
-        // Query 4: Broader (yapo, mercadolibre)
-        $queries[] = $cleaned . ' site:yapo.cl OR site:chilepropiedades.cl';
+        // Query 4: Broader portals
+        $queries[] = $cleaned . ' yapo.cl chilepropiedades.cl';
 
         return $queries;
     }
 
     private static function buildLegalQueries(string $cleaned): array {
         $queries = [];
-        $queries[] = $cleaned . ' site:leychile.cl OR site:bcn.cl';
+        $queries[] = $cleaned . ' leychile.cl bcn.cl';
         $queries[] = $cleaned . ' Chile legislación vigente';
         return $queries;
     }
 
     private static function buildNewsQueries(string $cleaned): array {
         $queries = [];
-        $siteFilter = DomainPolicy::getSiteFilter('news');
-        if ($siteFilter) {
-            $queries[] = $cleaned . ' ' . $siteFilter;
-        }
+        // Use news portals as hints
+        $queries[] = $cleaned . ' latercera.com emol.com cooperativa.cl';
         $queries[] = $cleaned . ' Chile hoy';
         return $queries;
     }
@@ -128,10 +132,7 @@ class QueryBuilder {
     private static function buildRetailQueries(string $cleaned): array {
         $queries = [];
         $queries[] = $cleaned . ' precio Chile';
-        $siteFilter = DomainPolicy::getSiteFilter('retail');
-        if ($siteFilter) {
-            $queries[] = $cleaned . ' ' . $siteFilter;
-        }
+        $queries[] = $cleaned . ' solotodo.cl falabella.com';
         return $queries;
     }
 

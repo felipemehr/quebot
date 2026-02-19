@@ -2,6 +2,7 @@
 /**
  * File-based search cache. TTL: 6 hours.
  * Keyed by (vertical + query) SHA256 hash.
+ * Does NOT cache empty results to avoid caching failures.
  */
 class SearchCache {
     private string $cacheDir;
@@ -38,6 +39,10 @@ class SearchCache {
     }
 
     public function set(string $vertical, string $query, array $results): void {
+        // Do NOT cache empty results — they likely indicate a search failure
+        $totalResults = $results['total_results'] ?? count($results['results'] ?? []);
+        if ($totalResults === 0) return;
+
         $path = $this->keyPath($vertical, $query);
         $json = json_encode($results, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         @file_put_contents($path, $json, LOCK_EX);
