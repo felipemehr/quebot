@@ -161,9 +161,6 @@ if (!$isFollowUp && !$isTypo && $messageWords >= 3) {
     }
 }
 
-// --- Detect property search ---
-$isPropertyQuery = isPropertySearch($messageLower);
-
 // --- Get UF value ---
 $ufData = getUFValue();
 $ufContext = '';
@@ -173,74 +170,37 @@ if ($ufData) {
     $ufContext .= "Conversiones: 1 hectárea (ha) = 10.000 m². 1 cuadra = 1,57 ha = 15.700 m².\n";
 }
 
-// --- Perform web search if needed ---
+// === SEARCH VIA ORCHESTRATOR ===
 $searchContext = '';
+$searchVertical = null;
+$searchProviderUsed = null;
 $ragStartTime = microtime(true);
+
 if ($shouldSearch) {
-    // For property searches: clean query + multi-search
-    if ($isPropertyQuery) {
-        $cleanedQuery = cleanPropertyQuery($searchQuery);
-        $propertyQueries = generatePropertyQueries($cleanedQuery);
-        
-        // Execute multiple searches and merge
-        $allResultSets = [];
-        foreach ($propertyQueries as $pq) {
-            $r = searchDuckDuckGo($pq);
-            if (!empty($r)) {
-                $allResultSets[] = $r;
-            }
-        }
-        $results = !empty($allResultSets) ? mergeSearchResults(...$allResultSets) : [];
-        
-        // For property searches: scrape more pages with more content
-        $maxPagesToScrape = 5;
-        $scrapeMaxLength = 5000;
-    } else {
-        // Regular search
-        $results = searchDuckDuckGo($searchQuery);
-        $maxPagesToScrape = 3;
-        $scrapeMaxLength = 3000;
-    }
-    
-    if (!empty($results)) {
-        $searchContext = "\n\n🔍 RESULTADOS DE BÚSQUEDA para \"{$searchQuery}\":\n";
-        $searchContext .= "⚠️ INSTRUCCIÓN: Los siguientes son TODOS los resultados encontrados. NO agregues propiedades, precios, sectores ni datos que NO estén aquí. Si necesitas más datos, di que no los encontraste.\n\n";
-        
-        $pagesToScrape = [];
-        
-        foreach ($results as $i => $r) {
-            $num = $i + 1;
-            $searchContext .= "{$num}. [{$r['type']}] {$r['title']}\n";
-            $searchContext .= "   URL: {$r['url']}\n";
-            if (!empty($r['snippet'])) {
-                $searchContext .= "   Extracto: {$r['snippet']}\n";
-            }
-            // For property searches: scrape specific AND listing pages
-            if ($isPropertyQuery) {
-                if (count($pagesToScrape) < $maxPagesToScrape) {
-                    $pagesToScrape[] = $r['url'];
-                }
-            } else {
-                if ($r['type'] !== 'specific' && count($pagesToScrape) < $maxPagesToScrape) {
-                    $pagesToScrape[] = $r['url'];
-                }
-            }
-        }
-        
-        if (!empty($pagesToScrape)) {
-            $searchContext .= "\n📄 CONTENIDO EXTRAÍDO DE PÁGINAS:\n";
-            foreach ($pagesToScrape as $pageUrl) {
-                $content = scrapePageContent($pageUrl, $scrapeMaxLength);
-                if ($content && strlen($content) > 100) {
-                    $searchContext .= "\n--- Contenido de: {$pageUrl} ---\n";
-                    $searchContext .= $content . "\n";
-                }
-            }
-        }
-        
-        $searchContext .= "\n⚠️ FIN DE RESULTADOS. Toda información en tu respuesta DEBE provenir exclusivamente de los datos anteriores. Si el usuario pidió algo que no aparece aquí, dilo explícitamente. NO inventes datos adicionales.\n";
-    } else {
-        $searchContext = "\n\n🔍 BÚSQUEDA para \"{$searchQuery}\": No se encontraron resultados. Informa al usuario que la búsqueda no arrojó resultados y sugiere portales donde buscar directamente: portalinmobiliario.com, yapo.cl, toctoc.com\n";
+    try {
+        $orchestrator = new SearchOrchestrator(CLAUDE_API_KEY, false);
+
+        // Auto-detect vertical from search query
+        $vertical = DomainPolicy::detectVertical($searchQuery);
+        $isPropertyQuery = ($vertical === 'real_estate');
+
+        // Configure scraping based on vertical
+        $options = [
+            'max_results' => 10,
+            'scrape_pages' => $isPropertyQuery ? 5 : 3,
+            'scrape_max_length' => $isPropertyQuery ? 5000 : 3000,
+        ];
+
+        $searchResult = $orchestrator->search($searchQuery, $vertical, $options);
+
+        // Use pre-built context for LLM
+        $searchContext = $searchResult['context_for_llm'] ?? '';
+        $searchVertical = $searchResult['vertical'] ?? null;
+        $searchProviderUsed = $searchResult['provider_used'] ?? null;
+    } catch (\Throwable $e) {
+        error_log("SearchOrchestrator error: " . $e->getMessage());
+        // Fallback: no search context (don't crash the chat)
+        $searchContext = "\n\n🔍 BÚSQUEDA para \"{$searchQuery}\": Error en la búsqueda. Informa al usuario que hubo un problema técnico buscando y sugiere buscar directamente en portalinmobiliario.com, yapo.cl, toctoc.com\n";
     }
 }
 
@@ -347,6 +307,8 @@ echo json_encode([
     'response' => $reply,
     'searched' => $shouldSearch,
     'searchQuery' => $shouldSearch ? $searchQuery : null,
+    'searchVertical' => $searchVertical,
+    'searchProvider' => $searchProviderUsed,
     'ufValue' => $ufData ? $ufData['formatted'] : null,
     'legalResults' => !empty($legalContext),
     'metadata' => [
