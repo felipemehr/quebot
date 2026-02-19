@@ -80,15 +80,20 @@ class SearchOrchestrator {
         $provider = $this->getPreferredProvider($vertical);
         $providerName = $provider->getName();
 
+        // Use parallel search if provider supports it (SerpAPI), else sequential
         $allResults = [];
         $seenUrls = [];
-        foreach ($queries as $q) {
-            $raw = $provider->search($q, $maxResults);
-            foreach ($raw as $r) {
-                $normUrl = rtrim($r['url'] ?? '', '/');
-                if (!isset($seenUrls[$normUrl])) {
-                    $allResults[] = $r;
-                    $seenUrls[$normUrl] = true;
+        if (method_exists($provider, 'searchParallel')) {
+            $allResults = $provider->searchParallel($queries, $maxResults);
+        } else {
+            foreach ($queries as $q) {
+                $raw = $provider->search($q, $maxResults);
+                foreach ($raw as $r) {
+                    $normUrl = rtrim($r['url'] ?? '', '/');
+                    if (!isset($seenUrls[$normUrl])) {
+                        $allResults[] = $r;
+                        $seenUrls[$normUrl] = true;
+                    }
                 }
             }
         }

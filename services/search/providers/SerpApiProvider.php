@@ -3,10 +3,7 @@ require_once __DIR__ . '/SearchProviderInterface.php';
 
 /**
  * SERP API provider (Google results via serpapi.com).
- * Requires env var SERPAPI_KEY.
- *
- * If SERPAPI_KEY is not set, this provider will return empty results
- * (the Orchestrator will fall back to DuckDuckGo).
+ * Supports parallel multi-query search via curl_multi.
  */
 class SerpApiProvider implements SearchProviderInterface {
     private string $apiKey;
@@ -37,61 +34,110 @@ class SerpApiProvider implements SearchProviderInterface {
         return !empty($this->apiKey);
     }
 
+    /**
+     * Single query search (existing behavior).
+     */
     public function search(string $query, int $maxResults = 10): array {
         if (!$this->isAvailable()) return [];
-
-        $params = http_build_query([
-            'engine' => $this->engine,
-            'q' => $query,
-            'location' => $this->location,
-            'gl' => $this->gl,
-            'hl' => $this->hl,
-            'num' => min($maxResults, 10),
-            'api_key' => $this->apiKey,
-        ]);
-
-        $url = "https://serpapi.com/search.json?{$params}";
-
-        $ctx = stream_context_create([
-            'http' => [
-                'timeout' => 12,
-                'header' => "User-Agent: QueBot/1.0\r\n",
-            ]
-        ]);
-
-        $response = @file_get_contents($url, false, $ctx);
-        if (!$response) {
-            error_log("SerpAPI request failed for query: {$query}");
-            return [];
-        }
-
-        $data = json_decode($response, true);
-        if (!$data || !isset($data['organic_results'])) {
-            error_log("SerpAPI invalid response for query: {$query}");
-            return [];
-        }
-
-        $results = [];
-        foreach ($data['organic_results'] as $i => $item) {
-            if ($i >= $maxResults) break;
-
-            $results[] = [
-                'title' => $item['title'] ?? 'Sin título',
-                'url' => $item['link'] ?? '',
-                'snippet' => $item['snippet'] ?? '',
-                'position' => $item['position'] ?? ($i + 1),
-                'source_provider' => 'serpapi',
-                'displayed_link' => $item['displayed_link'] ?? '',
-                'date' => $item['date'] ?? null,
-            ];
-        }
-
+        $results = $this->searchParallel([$query], $maxResults);
         return $results;
     }
 
     /**
-     * Scrape page content. SerpAPI doesn't provide page content,
-     * so we use basic HTTP scraping (same as DuckDuckGo provider).
+     * Parallel multi-query search using curl_multi.
+     * Runs all queries simultaneously, cutting total time to ~max(single_query_time).
+     *
+     * @param string[] $queries Array of search queries
+     * @param int $maxResults Max results per query
+     * @return array Deduplicated merged results
+     */
+    public function searchParallel(array $queries, int $maxResults = 10): array {
+        if (!$this->isAvailable() || empty($queries)) return [];
+
+        $multiHandle = curl_multi_init();
+        $handles = [];
+
+        // Create curl handles for all queries
+        foreach ($queries as $i => $query) {
+            $params = http_build_query([
+                'engine' => $this->engine,
+                'q' => $query,
+                'location' => $this->location,
+                'gl' => $this->gl,
+                'hl' => $this->hl,
+                'num' => min($maxResults, 10),
+                'api_key' => $this->apiKey,
+            ]);
+
+            $ch = curl_init("https://serpapi.com/search.json?{$params}");
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 12,
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_USERAGENT => 'QueBot/1.0',
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS => 3,
+            ]);
+
+            curl_multi_add_handle($multiHandle, $ch);
+            $handles[$i] = $ch;
+        }
+
+        // Execute all requests in parallel
+        $running = null;
+        do {
+            curl_multi_exec($multiHandle, $running);
+            if ($running > 0) {
+                curl_multi_select($multiHandle, 1.0);
+            }
+        } while ($running > 0);
+
+        // Collect results
+        $allResults = [];
+        $seenUrls = [];
+
+        foreach ($handles as $i => $ch) {
+            $response = curl_multi_getcontent($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_multi_remove_handle($multiHandle, $ch);
+            curl_close($ch);
+
+            if (!$response || $httpCode !== 200) {
+                error_log("SerpAPI parallel query {$i} failed: HTTP {$httpCode}");
+                continue;
+            }
+
+            $data = json_decode($response, true);
+            if (!$data || !isset($data['organic_results'])) {
+                error_log("SerpAPI parallel query {$i}: invalid response");
+                continue;
+            }
+
+            foreach ($data['organic_results'] as $j => $item) {
+                if ($j >= $maxResults) break;
+                $url = rtrim($item['link'] ?? '', '/');
+                if (isset($seenUrls[$url])) continue;
+                $seenUrls[$url] = true;
+
+                $allResults[] = [
+                    'title' => $item['title'] ?? 'Sin título',
+                    'url' => $item['link'] ?? '',
+                    'snippet' => $item['snippet'] ?? '',
+                    'position' => $item['position'] ?? ($j + 1),
+                    'source_provider' => 'serpapi',
+                    'displayed_link' => $item['displayed_link'] ?? '',
+                    'date' => $item['date'] ?? null,
+                ];
+            }
+        }
+
+        curl_multi_close($multiHandle);
+
+        return $allResults;
+    }
+
+    /**
+     * Scrape page content for enrichment.
      */
     public function scrapeContent(string $url, int $maxLength = 3000): ?string {
         $ctx = stream_context_create([
