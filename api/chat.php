@@ -3,7 +3,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/search.php';
 require_once __DIR__ . '/../services/legal/LegalSearch.php';
 
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
@@ -40,6 +40,17 @@ if (empty($message)) {
     exit;
 }
 
+/**
+ * Sanitize text for JSON encoding - remove invalid UTF-8 sequences
+ */
+function sanitizeUtf8(string $text): string {
+    // Remove invalid UTF-8 sequences
+    $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
+    // Remove null bytes and other control characters (keep newlines/tabs)
+    $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+    return $text;
+}
+
 // --- Determine if we should search ---
 $shouldSearch = false;
 $searchQuery = $message;
@@ -60,7 +71,6 @@ $isFollowUp = false;
 foreach ($followUpPatterns as $fp) {
     if (strpos($messageLower, $fp) !== false) {
         $isFollowUp = true;
-        // Extract real topic from conversation history
         for ($i = count($conversationHistory) - 1; $i >= 0; $i--) {
             if (isset($conversationHistory[$i]['role']) && $conversationHistory[$i]['role'] === 'user') {
                 $prevMsg = $conversationHistory[$i]['content'] ?? '';
@@ -77,7 +87,6 @@ foreach ($followUpPatterns as $fp) {
 
 // Short messages (1-2 words) - don't search
 if (!$isFollowUp && !$isTypo && $messageWords >= 3) {
-    // Search keywords
     $searchKeywords = ['busca', 'buscar', 'encuentra', 'encontrar', 'dónde', 'donde', 'cuánto', 'cuanto', 
                        'precio', 'costo', 'valor', 'noticias', 'clima', 'tiempo', 'dólar', 'uf ',
                        'parcela', 'casa', 'depto', 'departamento', 'terreno', 'arriendo', 'venta',
@@ -91,7 +100,6 @@ if (!$isFollowUp && !$isTypo && $messageWords >= 3) {
         }
     }
     
-    // Current info triggers - ALWAYS search
     $currentInfoTriggers = ['hoy', 'ahora', 'actual', 'últimas', 'recientes', 'esta semana', 'este mes'];
     foreach ($currentInfoTriggers as $trigger) {
         if (strpos($messageLower, $trigger) !== false) {
@@ -117,7 +125,6 @@ if ($shouldSearch) {
     
     if (!empty($results)) {
         $searchContext = "\n\n🔍 RESULTADOS DE BÚSQUEDA para \"{$searchQuery}\":\n";
-        
         $pagesToScrape = [];
         
         foreach ($results as $i => $r) {
@@ -127,14 +134,11 @@ if ($shouldSearch) {
             if (!empty($r['snippet'])) {
                 $searchContext .= "   Extracto: {$r['snippet']}\n";
             }
-            
-            // Scrape non-specific pages (listings and unknown)
             if ($r['type'] !== 'specific' && count($pagesToScrape) < 3) {
                 $pagesToScrape[] = $r['url'];
             }
         }
         
-        // Scrape listing pages for real property data
         if (!empty($pagesToScrape)) {
             $searchContext .= "\n📄 CONTENIDO EXTRAÍDO DE PÁGINAS:\n";
             foreach ($pagesToScrape as $pageUrl) {
@@ -151,9 +155,11 @@ if ($shouldSearch) {
 // --- Legal library search (PostgreSQL RAG) ---
 $legalContext = '';
 try {
-    $legalContext = LegalSearch::buildContext($message);
+    $rawLegal = LegalSearch::buildContext($message);
+    if (!empty($rawLegal)) {
+        $legalContext = sanitizeUtf8($rawLegal);
+    }
 } catch (Exception $e) {
-    // Legal search is non-blocking - if DB is down, continue without it
     error_log("Legal search failed: " . $e->getMessage());
 }
 
@@ -162,13 +168,12 @@ $systemPrompt = SYSTEM_PROMPT . $ufContext;
 
 $messages = [];
 
-// Include conversation history (last 20 messages)
 $history = array_slice($conversationHistory, -20);
 foreach ($history as $msg) {
     if (isset($msg['role']) && isset($msg['content'])) {
         $messages[] = [
             'role' => $msg['role'],
-            'content' => $msg['content']
+            'content' => sanitizeUtf8($msg['content'])
         ];
     }
 }
@@ -184,16 +189,24 @@ if (!empty($legalContext)) {
 
 $messages[] = [
     'role' => 'user',
-    'content' => $userMessage
+    'content' => sanitizeUtf8($userMessage)
 ];
 
 // --- Call Claude API ---
 $apiData = [
     'model' => MODEL,
     'max_tokens' => MAX_TOKENS,
-    'system' => $systemPrompt,
+    'system' => sanitizeUtf8($systemPrompt),
     'messages' => $messages
 ];
+
+$jsonPayload = json_encode($apiData, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
+if ($jsonPayload === false) {
+    error_log("json_encode failed: " . json_last_error_msg());
+    http_response_code(500);
+    echo json_encode(['error' => 'Internal encoding error']);
+    exit;
+}
 
 $ch = curl_init('https://api.anthropic.com/v1/messages');
 curl_setopt_array($ch, [
@@ -204,7 +217,7 @@ curl_setopt_array($ch, [
         'x-api-key: ' . CLAUDE_API_KEY,
         'anthropic-version: 2023-06-01'
     ],
-    CURLOPT_POSTFIELDS => json_encode($apiData),
+    CURLOPT_POSTFIELDS => $jsonPayload,
     CURLOPT_TIMEOUT => 60
 ]);
 
@@ -227,5 +240,5 @@ echo json_encode([
     'searchQuery' => $shouldSearch ? $searchQuery : null,
     'ufValue' => $ufData ? $ufData['formatted'] : null,
     'legalResults' => !empty($legalContext)
-]);
+], JSON_UNESCAPED_UNICODE);
 ?>
