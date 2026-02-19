@@ -23,6 +23,7 @@ class QueBotAuth {
     this.db = null;
     this.currentUser = null;
     this.userProfile = null;
+    this.searchProfile = null;
     this.messageCount = 0;
     this.hasAskedForRegistration = false;
     this.initialized = false;
@@ -45,6 +46,7 @@ class QueBotAuth {
         if (user) {
           this.currentUser = user;
           await this.loadUserProfile();
+        await this.loadSearchProfile();
           this.updateUI();
         } else {
           await this.signInAnonymously();
@@ -288,6 +290,58 @@ class QueBotAuth {
   }
 
   // Get user context string for API
+
+  // === SEARCH PROFILE (Memory System B1) ===
+  
+  /**
+   * Get the user's search profile for sending to backend.
+   * Returns cached profile or null if not loaded yet.
+   */
+  getSearchProfile() {
+    return this.searchProfile || null;
+  }
+
+  /**
+   * Save updated search profile from backend response.
+   * Stores in Firestore and local cache.
+   */
+  async saveSearchProfile(profileData) {
+    if (!profileData || !this.currentUser) return;
+    
+    this.searchProfile = profileData;
+    
+    try {
+      // Save to Firestore under users/{uid}
+      if (typeof queBotDB !== 'undefined') {
+        await queBotDB.saveUser(this.currentUser.uid, {
+          search_profile: profileData
+        });
+      }
+      console.log('Search profile saved:', Object.keys(profileData).length, 'fields');
+    } catch (error) {
+      console.error('Save search profile error:', error);
+    }
+  }
+
+  /**
+   * Load search profile from Firestore on init.
+   */
+  async loadSearchProfile() {
+    if (!this.currentUser) return;
+    
+    try {
+      if (typeof queBotDB !== 'undefined') {
+        const userData = await queBotDB.getUser(this.currentUser.uid);
+        if (userData && userData.search_profile) {
+          this.searchProfile = userData.search_profile;
+          console.log('Search profile loaded:', Object.keys(this.searchProfile).length, 'fields');
+        }
+      }
+    } catch (error) {
+      console.error('Load search profile error:', error);
+    }
+  }
+
   getUserContext() {
     if (!this.userProfile) return '';
     

@@ -2,6 +2,7 @@
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/search.php';
 require_once __DIR__ . '/../services/legal/LegalSearch.php';
+require_once __DIR__ . '/../services/ProfileBuilder.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -83,6 +84,7 @@ $message = $input['message'] ?? '';
 $conversationHistory = $input['history'] ?? [];
 $userId = $input['userId'] ?? 'anonymous';
 $userName = $input['userName'] ?? '';
+$userProfile = $input['user_profile'] ?? null;
 
 if (empty($message)) {
     http_response_code(400);
@@ -379,6 +381,23 @@ if ($shouldSearch && !empty($searchValidURLs)) {
     }
 }
 
+// === PROFILE EXTRACTION (Haiku) ===
+$profileUpdate = null;
+$profileTimingMs = 0;
+try {
+    $profileBuilder = new ProfileBuilder(CLAUDE_API_KEY);
+    if ($profileBuilder->shouldExtract($message)) {
+        $profileStart = microtime(true);
+        $profileUpdate = $profileBuilder->extractProfile($message, $reply, $userProfile);
+        $profileTimingMs = round((microtime(true) - $profileStart) * 1000);
+        if ($profileUpdate) {
+            error_log("ProfileBuilder: Profile updated (" . count(array_filter($profileUpdate, fn($v) => $v !== null && $v !== [])) . " fields) in {$profileTimingMs}ms");
+        }
+    }
+} catch (Exception $e) {
+    error_log("ProfileBuilder error: " . $e->getMessage());
+}
+
 // === TIMING & METADATA ===
 $endTime = microtime(true);
 $timingTotal = round(($endTime - $startTime) * 1000);
@@ -406,7 +425,9 @@ echo json_encode([
         'timing_total' => $timingTotal,
         'timing_rag' => $timingRag,
         'timing_llm' => $timingLlm,
-        'fabricated_urls_caught' => $fabricatedCount
-    ]
+        'fabricated_urls_caught' => $fabricatedCount,
+        'timing_profile' => $profileTimingMs
+    ],
+    'profile_update' => $profileUpdate
 ], JSON_UNESCAPED_UNICODE);
 ?>
