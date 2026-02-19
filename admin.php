@@ -98,6 +98,12 @@ $authenticated = isset($_SESSION['admin_auth']) && $_SESSION['admin_auth'] === t
         .badge-closed { background: #fce4ec; color: #c62828; }
         .badge-user { background: #e3f2fd; color: #1565c0; }
         .badge-assistant { background: #f3e5f5; color: #7b1fa2; }
+        .badge-anon { background: #fff3e0; color: #e65100; }
+        .badge-google { background: #e8f5e9; color: #2e7d32; }
+        .profile-link { color: #1F3A5F; cursor: pointer; text-decoration: underline; }
+        .profile-detail { background: #f7f8fa; padding: 12px; border-radius: 8px; margin: 8px 0; font-size: 13px; }
+        .profile-detail dt { font-weight: 600; color: #1F3A5F; margin-top: 8px; }
+        .profile-detail dd { margin-left: 12px; color: #444; }
         
         .loading { text-align: center; padding: 40px; color: #888; }
         .empty { text-align: center; padding: 40px; color: #aaa; }
@@ -258,7 +264,7 @@ function renderTable() {
             cols = ['id', 'user_id', 'status', 'channel', 'vertical', 'created_at', 'messages'];
             break;
         case 'users':
-            cols = ['id', 'display_name', 'email', 'auth_provider', 'last_seen_at', 'search_profile'];
+            cols = ['id', 'tipo', 'display_name', 'email', 'last_seen_at', 'casos', 'perfil'];
             break;
         case 'messages':
             cols = ['id', 'case_id', 'role', 'text', 'created_at'];
@@ -288,8 +294,24 @@ function renderTable() {
                 val = `<span class="badge ${cls}">${val}</span>`;
             } else if (c === 'text' && typeof val === 'string' && val.length > 80) {
                 val = val.substring(0, 80) + '...';
-            } else if (c === 'search_profile' && val && val !== '-') {
-                val = typeof val === 'string' && val.length > 60 ? val.substring(0, 60) + '...' : val;
+            } else if (c === 'perfil' && currentTab === 'users') {
+                const sp = row.search_profile;
+                if (sp && sp !== '-') {
+                    val = '<span class="profile-link" onclick="showProfile(\'' + row.id.replace(/'/g, "\\'") + '\')">Ver perfil</span>';
+                } else {
+                    val = '<span style="color:#aaa">Sin perfil</span>';
+                }
+            } else if (c === 'tipo' && currentTab === 'users') {
+                const provider = row.auth_provider || '';
+                const email = row.email || '';
+                if (provider === 'google.com' || email.includes('@')) {
+                    val = '<span class="badge badge-google">Google</span>';
+                } else {
+                    val = '<span class="badge badge-anon">Anónimo</span>';
+                }
+            } else if (c === 'casos' && currentTab === 'users') {
+                const count = allData.cases.filter(cs => cs.user_id === row.id).length;
+                val = count;
             } else if (c === 'messages' && currentTab === 'cases') {
                 val = `<span class="detail-link" onclick="showMessages('${row.id}')">Ver mensajes</span>`;
             } else if (c === 'id' && typeof val === 'string' && val.length > 12) {
@@ -339,6 +361,69 @@ function closeModal() {
 document.getElementById('modal').addEventListener('click', (e) => {
     if (e.target === document.getElementById('modal')) closeModal();
 });
+
+
+function showProfile(userId) {
+    const user = allData.users.find(u => u.id === userId);
+    if (!user) return;
+    
+    const modal = document.getElementById('modal');
+    const body = document.getElementById('modal-body');
+    document.getElementById('modal-title').textContent = user.display_name || user.email || 'Usuario ' + userId.substring(0, 12);
+    
+    let html = '<div class="profile-detail">';
+    
+    // User info
+    html += '<h4 style="margin-bottom:12px;color:#1F3A5F">Información del usuario</h4>';
+    html += '<dl>';
+    html += '<dt>ID</dt><dd>' + userId + '</dd>';
+    html += '<dt>Tipo</dt><dd>' + (user.auth_provider === 'google.com' || (user.email && user.email.includes('@')) ? '🟢 Google' : '🟡 Anónimo') + '</dd>';
+    if (user.email) html += '<dt>Email</dt><dd>' + user.email + '</dd>';
+    if (user.display_name) html += '<dt>Nombre</dt><dd>' + user.display_name + '</dd>';
+    if (user.last_seen_at) html += '<dt>Última visita</dt><dd>' + user.last_seen_at + '</dd>';
+    html += '<dt>Casos</dt><dd>' + allData.cases.filter(c => c.user_id === userId).length + '</dd>';
+    html += '<dt>Mensajes</dt><dd>' + allData.messages.filter(m => {
+        const userCases = allData.cases.filter(c => c.user_id === userId).map(c => c.id);
+        return userCases.includes(m.case_id);
+    }).length + '</dd>';
+    html += '</dl>';
+    
+    // Search profile
+    const sp = user.search_profile;
+    if (sp && sp !== '-') {
+        html += '<h4 style="margin:16px 0 12px;color:#1F3A5F">Perfil de búsqueda</h4>';
+        html += '<dl>';
+        try {
+            const profile = typeof sp === 'string' ? JSON.parse(sp) : sp;
+            const labels = {
+                locations: '📍 Ubicaciones',
+                property_types: '🏠 Tipos de propiedad',
+                bedrooms: '🛏️ Dormitorios',
+                bathrooms: '🚿 Baños',
+                budget: '💰 Presupuesto',
+                min_area_m2: '📐 Área mínima (m²)',
+                purpose: '🎯 Propósito',
+                family_info: '👨\u200d👩\u200d👧 Info familiar',
+                key_requirements: '📋 Requisitos clave',
+                top_searches: '🔍 Búsquedas principales'
+            };
+            for (const [key, value] of Object.entries(profile)) {
+                const label = labels[key] || key;
+                let display = Array.isArray(value) ? value.join(', ') : String(value);
+                html += '<dt>' + label + '</dt><dd>' + display + '</dd>';
+            }
+        } catch(e) {
+            html += '<dt>Raw</dt><dd>' + sp + '</dd>';
+        }
+        html += '</dl>';
+    } else {
+        html += '<p style="color:#aaa;margin-top:16px">Este usuario aún no tiene perfil de búsqueda.</p>';
+    }
+    
+    html += '</div>';
+    body.innerHTML = html;
+    modal.classList.add('show');
+}
 
 loadAll();
 </script>
