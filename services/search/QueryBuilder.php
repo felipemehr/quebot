@@ -99,17 +99,12 @@ class QueryBuilder {
     private static function buildRealEstateQueries(string $cleaned): array {
         $queries = [];
 
-        // Query 1: Direct + "venta"
-        $queries[] = $cleaned . ' venta';
+        // 2 queries max to stay within timeout budget (~7s each via SerpAPI)
+        // Query 1: Top portals
+        $queries[] = $cleaned . ' venta portalinmobiliario.com toctoc.com';
 
-        // Query 2: Portal-specific hint (portalinmobiliario)
-        $queries[] = $cleaned . ' portalinmobiliario.com';
-
-        // Query 3: Alternative portals
-        $queries[] = $cleaned . ' toctoc.com goplaceit.com';
-
-        // Query 4: Broader portals
-        $queries[] = $cleaned . ' yapo.cl chilepropiedades.cl';
+        // Query 2: Secondary portals
+        $queries[] = $cleaned . ' venta yapo.cl chilepropiedades.cl goplaceit.com';
 
         return $queries;
     }

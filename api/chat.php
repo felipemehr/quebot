@@ -79,6 +79,9 @@ if (!checkRateLimit($clientIp)) {
 // === START TIMING ===
 $startTime = microtime(true);
 
+
+set_time_limit(120); // Allow 120s for search + LLM + profile pipeline
+
 $input = json_decode(file_get_contents('php://input'), true);
 $message = $input['message'] ?? '';
 $conversationHistory = $input['history'] ?? [];
@@ -301,7 +304,7 @@ foreach ($followUpPatterns as $fp) {
     }
 }
 
-if (!$isFollowUp && !$isTypo && $messageWords >= 3) {
+if (!$isFollowUp && !$isTypo && $messageWords >= 2) {
     $searchKeywords = ['busca', 'buscar', 'encuentra', 'encontrar', 'dónde', 'donde', 'cuánto', 'cuanto', 
                        'precio', 'costo', 'valor', 'noticias', 'clima', 'tiempo', 'dólar', 'uf ',
                        'parcela', 'casa', 'depto', 'departamento', 'terreno', 'arriendo', 'venta',
