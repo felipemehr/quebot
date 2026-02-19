@@ -1,23 +1,10 @@
 <?php
 /**
  * QueBot Legal Library - Sync Test Endpoint
- * GET /api/legal/sync-test?idNorma=...
+ * GET /api/legal/sync-test?idNorma=...&token=...
  * 
  * Processes a single norm and returns a JSON summary.
  * Protected by ADMIN_TOKEN.
- * 
- * Response:
- * {
- *   "norma": "Ley 19.880",
- *   "id_norma": "210676",
- *   "version_detected": "2026-02-05",
- *   "text_hash": "abc123...",
- *   "article_count": 69,
- *   "chunks_created": 85,
- *   "xml_size_bytes": 110429,
- *   "status": "synced",
- *   "duration_ms": 2340
- * }
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -29,10 +16,16 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     exit;
 }
 
-// Auth check
-require_once __DIR__ . '/../config.php';
-$token = $_GET['token'] ?? $_SERVER['HTTP_X_ADMIN_TOKEN'] ?? '';
-if ($token !== ADMIN_TOKEN) {
+// Auth check (same pattern as sync.php)
+$adminToken = getenv('ADMIN_TOKEN');
+if (!$adminToken) {
+    http_response_code(500);
+    echo json_encode(['error' => 'ADMIN_TOKEN not configured']);
+    exit;
+}
+
+$providedToken = $_SERVER['HTTP_X_ADMIN_TOKEN'] ?? $_GET['token'] ?? '';
+if ($providedToken !== $adminToken) {
     http_response_code(401);
     echo json_encode(['error' => 'Unauthorized. Provide ?token= or X-Admin-Token header.']);
     exit;
@@ -41,7 +34,6 @@ if ($token !== ADMIN_TOKEN) {
 // Require idNorma
 $idNorma = $_GET['idNorma'] ?? '';
 if (empty($idNorma)) {
-    http_response_code(400);
     echo json_encode([
         'error' => 'Missing required parameter: idNorma',
         'usage' => 'GET /api/legal/sync-test?idNorma=210676&token=YOUR_TOKEN',
@@ -52,12 +44,12 @@ if (empty($idNorma)) {
             '1174663' => 'Ley 21.442 Copropiedad Inmobiliaria',
             '210676' => 'Ley 19.880 Procedimiento Administrativo',
         ],
-    ]);
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 // Extended timeout for large norms (Código Civil = 2.9MB, CPC = 57MB)
-set_time_limit(300); // 5 minutes
+set_time_limit(300);
 ini_set('memory_limit', '512M');
 
 require_once __DIR__ . '/../../services/legal/LegalSync.php';
@@ -98,9 +90,9 @@ try {
         'tipo' => $norm['tipo'] ?? null,
         'numero' => $norm['numero'] ?? null,
         'version_detected' => $versionInfo['fecha_version'] ?? null,
-        'text_hash' => $versionInfo['text_hash'] ?? null,
+        'text_hash' => substr($versionInfo['text_hash'] ?? '', 0, 16) . '...',
         'article_count' => $versionInfo ? (int)$versionInfo['article_count'] : 0,
-        'chunks_created' => $chunkCount,
+        'chunks_in_db' => $chunkCount,
         'xml_size_bytes' => $versionInfo ? (int)$versionInfo['xml_size'] : 0,
         'status' => $result['status'] ?? 'unknown',
         'norms_updated' => (int)($result['norms_updated'] ?? 0),
