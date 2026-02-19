@@ -323,12 +323,13 @@ class LegalSync {
     private function seedCoreNorms(): array {
         $coreNormsEnv = getenv('LEGAL_CORE_NORMS');
         if (!$coreNormsEnv) {
-            // Default core set: important Chilean laws
+            // Core set: verified against BCN LeyChile XML (Feb 2026)
             $defaultNorms = [
-                '141599',  // Ley 19628 - Protección de datos personales
-                '242302',  // Ley 20285 - Transparencia y acceso a la información pública
-                '29726',   // DFL 1 Código Civil
-                '276268',  // Ley 21131 - Pago a 30 días
+                '172986',   // Código Civil (DFL 1, 2000) - 2.9 MB XML
+                '22740',    // Código de Procedimiento Civil (1902) - 57 MB XML
+                '13560',    // DFL 458 Ley General de Urbanismo y Construcciones - 484 KB
+                '1174663',  // Ley 21.442 Copropiedad Inmobiliaria (reemplaza 19537) - 590 KB
+                '210676',   // Ley 19.880 Procedimiento Administrativo - 110 KB
             ];
         } else {
             // Parse JSON array or CSV
