@@ -24,7 +24,7 @@
     --accent-secondary: #3b82f6;
     --accent-orange: #f97316;
     
-    --message-user-bg: #1F3A5F;
+    --message-user-bg: rgba(31, 58, 95, 0.85);
     --message-user-text: #ffffff;
     --message-bot-bg: #ffffff;
     --message-bot-text: #1C1E21;
@@ -66,7 +66,7 @@
     --accent-primary: #4a7ab5;
     --accent-primary-hover: #3d6b9e;
     
-    --message-user-bg: #1F3A5F;
+    --message-user-bg: rgba(31, 58, 95, 0.85);
     --message-user-text: #ffffff;
     --message-bot-bg: #262626;
     --message-bot-text: #f9fafb;

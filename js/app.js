@@ -247,7 +247,7 @@ const App = {
             UI.setChatTitle(chat.title);
             UI.renderMessages(chat.messages);
         } else {
-            UI.setChatTitle('Nuevo caso');
+            UI.setChatTitle('Nueva Misión');
             UI.renderMessages([]);
         }
     },
