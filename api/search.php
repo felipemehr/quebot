@@ -33,11 +33,6 @@ function getUFValue() {
     
     $monthHtml = $monthMatch[1];
     
-    // Table structure: each row has 3 pairs of (day, value)
-    // <th><strong>1</strong></th><td>39.703,50</td>
-    // <th><strong>11</strong></th><td>39.694,31</td>
-    // <th><strong>21</strong></th><td>39.750,94</td>
-    
     // Extract all day-value pairs
     $values = [];
     preg_match_all('/<strong>(\d+)<\/strong><\/th>\s*<td[^>]*>([^<]*)<\/td>/s', $monthHtml, $matches, PREG_SET_ORDER);
@@ -53,7 +48,6 @@ function getUFValue() {
     // Try today, then go backwards to find most recent value
     for ($d = $day; $d >= 1; $d--) {
         if (isset($values[$d])) {
-            // Convert "39.733,94" to float 39733.94
             $numStr = str_replace('.', '', $values[$d]);
             $numStr = str_replace(',', '.', $numStr);
             return [
@@ -93,6 +87,95 @@ function getUFValue() {
     }
     
     return null;
+}
+
+/**
+ * Clean a search query by expanding abbreviations and removing bot instructions
+ */
+function cleanPropertyQuery(string $query): string {
+    // Expand common abbreviations
+    $abbreviations = [
+        '/\b1d\b/i' => '1 dormitorio',
+        '/\b2d\b/i' => '2 dormitorios',
+        '/\b3d\b/i' => '3 dormitorios',
+        '/\b4d\b/i' => '4 dormitorios',
+        '/\b5d\b/i' => '5 dormitorios',
+        '/\b1b\b/i' => '1 baño',
+        '/\b2b\b/i' => '2 baños',
+        '/\b3b\b/i' => '3 baños',
+        '/\b4b\b/i' => '4 baños',
+    ];
+    $query = preg_replace(array_keys($abbreviations), array_values($abbreviations), $query);
+    
+    // Remove bot instructions that pollute search
+    $instructionPatterns = [
+        '/datos?\s*reales?/i',
+        '/tabla\s+link/i',
+        '/m[ií]nimo\s+\d+\s+propiedades?/i',
+        '/caracter[ií]sticas?\s*(y\s+)?rating/i',
+        '/val\s+m2\s+construido/i',
+        '/m2\s+terreno/i',
+        '/m2\s+casa/i',
+        '/\+[\-\/]\s*\d+\s*uf/i',
+        '/\brating\b/i',
+        '/\benlace\b/i',
+        '/\blink\b/i',
+        '/\bcon\s+links?\b/i',
+    ];
+    $query = preg_replace($instructionPatterns, '', $query);
+    
+    // Clean up extra spaces and commas
+    $query = preg_replace('/,\s*,/', ',', $query);
+    $query = preg_replace('/\s+/', ' ', $query);
+    $query = trim($query, ' ,.');
+    
+    return $query;
+}
+
+/**
+ * Detect if a query is about property/real estate search
+ */
+function isPropertySearch(string $messageLower): bool {
+    $propertyTerms = ['casa', 'depto', 'departamento', 'parcela', 'terreno', 
+                      'sitio', 'propiedad', 'lote', 'campo', 'arriendo',
+                      'inmueble', 'condominio', 'cabaña'];
+    $actionTerms = ['busca', 'encuentra', 'venta', 'comprar', 'precio', 'uf '];
+    
+    $hasProperty = false;
+    $hasAction = false;
+    
+    foreach ($propertyTerms as $term) {
+        if (strpos($messageLower, $term) !== false) {
+            $hasProperty = true;
+            break;
+        }
+    }
+    foreach ($actionTerms as $term) {
+        if (strpos($messageLower, $term) !== false) {
+            $hasAction = true;
+            break;
+        }
+    }
+    
+    return $hasProperty && $hasAction;
+}
+
+/**
+ * Generate multiple search queries for property searches
+ */
+function generatePropertyQueries(string $cleanedQuery): array {
+    $queries = [];
+    
+    // Query 1: Direct search
+    $queries[] = $cleanedQuery . ' venta';
+    
+    // Query 2: Portal-specific (portalinmobiliario)
+    $queries[] = $cleanedQuery . ' portalinmobiliario.com';
+    
+    // Query 3: Alternative portals
+    $queries[] = $cleanedQuery . ' toctoc.com yapo.cl';
+    
+    return $queries;
 }
 
 function classifyUrl($url) {
@@ -179,6 +262,26 @@ function searchDuckDuckGo($query, $numResults = 8) {
     }
     
     return $results;
+}
+
+/**
+ * Merge multiple search result sets, deduplicating by URL
+ */
+function mergeSearchResults(array ...$resultSets): array {
+    $merged = [];
+    $seenUrls = [];
+    
+    foreach ($resultSets as $results) {
+        foreach ($results as $result) {
+            $normalizedUrl = rtrim($result['url'], '/');
+            if (!in_array($normalizedUrl, $seenUrls)) {
+                $merged[] = $result;
+                $seenUrls[] = $normalizedUrl;
+            }
+        }
+    }
+    
+    return $merged;
 }
 
 function scrapePageContent($url, $maxLength = 3000) {

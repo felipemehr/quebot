@@ -161,6 +161,9 @@ if (!$isFollowUp && !$isTypo && $messageWords >= 3) {
     }
 }
 
+// --- Detect property search ---
+$isPropertyQuery = isPropertySearch($messageLower);
+
 // --- Get UF value ---
 $ufData = getUFValue();
 $ufContext = '';
@@ -174,10 +177,35 @@ if ($ufData) {
 $searchContext = '';
 $ragStartTime = microtime(true);
 if ($shouldSearch) {
-    $results = searchDuckDuckGo($searchQuery);
+    // For property searches: clean query + multi-search
+    if ($isPropertyQuery) {
+        $cleanedQuery = cleanPropertyQuery($searchQuery);
+        $propertyQueries = generatePropertyQueries($cleanedQuery);
+        
+        // Execute multiple searches and merge
+        $allResultSets = [];
+        foreach ($propertyQueries as $pq) {
+            $r = searchDuckDuckGo($pq);
+            if (!empty($r)) {
+                $allResultSets[] = $r;
+            }
+        }
+        $results = !empty($allResultSets) ? mergeSearchResults(...$allResultSets) : [];
+        
+        // For property searches: scrape more pages with more content
+        $maxPagesToScrape = 5;
+        $scrapeMaxLength = 5000;
+    } else {
+        // Regular search
+        $results = searchDuckDuckGo($searchQuery);
+        $maxPagesToScrape = 3;
+        $scrapeMaxLength = 3000;
+    }
     
     if (!empty($results)) {
         $searchContext = "\n\n🔍 RESULTADOS DE BÚSQUEDA para \"{$searchQuery}\":\n";
+        $searchContext .= "⚠️ INSTRUCCIÓN: Los siguientes son TODOS los resultados encontrados. NO agregues propiedades, precios, sectores ni datos que NO estén aquí. Si necesitas más datos, di que no los encontraste.\n\n";
+        
         $pagesToScrape = [];
         
         foreach ($results as $i => $r) {
@@ -187,21 +215,32 @@ if ($shouldSearch) {
             if (!empty($r['snippet'])) {
                 $searchContext .= "   Extracto: {$r['snippet']}\n";
             }
-            if ($r['type'] !== 'specific' && count($pagesToScrape) < 3) {
-                $pagesToScrape[] = $r['url'];
+            // For property searches: scrape specific AND listing pages
+            if ($isPropertyQuery) {
+                if (count($pagesToScrape) < $maxPagesToScrape) {
+                    $pagesToScrape[] = $r['url'];
+                }
+            } else {
+                if ($r['type'] !== 'specific' && count($pagesToScrape) < $maxPagesToScrape) {
+                    $pagesToScrape[] = $r['url'];
+                }
             }
         }
         
         if (!empty($pagesToScrape)) {
             $searchContext .= "\n📄 CONTENIDO EXTRAÍDO DE PÁGINAS:\n";
             foreach ($pagesToScrape as $pageUrl) {
-                $content = scrapePageContent($pageUrl);
+                $content = scrapePageContent($pageUrl, $scrapeMaxLength);
                 if ($content && strlen($content) > 100) {
                     $searchContext .= "\n--- Contenido de: {$pageUrl} ---\n";
                     $searchContext .= $content . "\n";
                 }
             }
         }
+        
+        $searchContext .= "\n⚠️ FIN DE RESULTADOS. Toda información en tu respuesta DEBE provenir exclusivamente de los datos anteriores. Si el usuario pidió algo que no aparece aquí, dilo explícitamente. NO inventes datos adicionales.\n";
+    } else {
+        $searchContext = "\n\n🔍 BÚSQUEDA para \"{$searchQuery}\": No se encontraron resultados. Informa al usuario que la búsqueda no arrojó resultados y sugiere portales donde buscar directamente: portalinmobiliario.com, yapo.cl, toctoc.com\n";
     }
 }
 
