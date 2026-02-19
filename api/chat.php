@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/search.php';
+require_once __DIR__ . '/../services/legal/LegalSearch.php';
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -109,7 +110,7 @@ if ($ufData) {
     $ufContext .= "Conversiones: 1 hectárea (ha) = 10.000 m². 1 cuadra = 1,57 ha = 15.700 m².\n";
 }
 
-// --- Perform search if needed ---
+// --- Perform web search if needed ---
 $searchContext = '';
 if ($shouldSearch) {
     $results = searchDuckDuckGo($searchQuery);
@@ -147,6 +148,15 @@ if ($shouldSearch) {
     }
 }
 
+// --- Legal library search (PostgreSQL RAG) ---
+$legalContext = '';
+try {
+    $legalContext = LegalSearch::buildContext($message);
+} catch (Exception $e) {
+    // Legal search is non-blocking - if DB is down, continue without it
+    error_log("Legal search failed: " . $e->getMessage());
+}
+
 // --- Build messages for Claude ---
 $systemPrompt = SYSTEM_PROMPT . $ufContext;
 
@@ -163,10 +173,13 @@ foreach ($history as $msg) {
     }
 }
 
-// Add current message with search context
+// Add current message with search + legal context
 $userMessage = $message;
 if (!empty($searchContext)) {
     $userMessage .= $searchContext;
+}
+if (!empty($legalContext)) {
+    $userMessage .= $legalContext;
 }
 
 $messages[] = [
@@ -212,6 +225,7 @@ echo json_encode([
     'response' => $reply,
     'searched' => $shouldSearch,
     'searchQuery' => $shouldSearch ? $searchQuery : null,
-    'ufValue' => $ufData ? $ufData['formatted'] : null
+    'ufValue' => $ufData ? $ufData['formatted'] : null,
+    'legalResults' => !empty($legalContext)
 ]);
 ?>
