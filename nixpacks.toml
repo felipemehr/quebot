@@ -1,5 +1,0 @@
-# QueBot - Railway Nixpacks Configuration
-# PHP with PostgreSQL support
-
-[phases.setup]
-nixPkgs = ["php82Extensions.pdo_pgsql", "php82Extensions.pgsql"]
