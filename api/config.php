@@ -10,7 +10,11 @@ define('MAX_TOKENS', 4096);
 define('RATE_LIMIT_PER_MINUTE', 10);
 
 // Allowed origins for CORS
-define('ALLOWED_ORIGINS', ['https://quebot-production.up.railway.app', 'http://localhost:8080']);
+define('ALLOWED_ORIGINS', [
+    'https://quebot-production.up.railway.app',
+    'https://spirited-purpose-production-a4e8.up.railway.app',
+    'http://localhost:8080'
+]);
 
 // System prompt
 define('SYSTEM_PROMPT', <<<'PROMPT'
