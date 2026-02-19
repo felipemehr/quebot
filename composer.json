@@ -1,9 +1,7 @@
 {
     "require": {
-        "ext-pdo_pgsql": "*",
+        "php": ">=8.2",
         "ext-pgsql": "*",
-        "ext-mbstring": "*",
-        "ext-xml": "*",
-        "ext-curl": "*"
+        "ext-pdo_pgsql": "*"
     }
 }
