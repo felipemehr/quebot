@@ -110,7 +110,7 @@ const App = {
         UI.elements.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
 
         // Suggestion cards
-        document.querySelectorAll('.suggestion-card').forEach(card => {
+        document.querySelectorAll('.action-card').forEach(card => {
             card.addEventListener('click', () => {
                 const prompt = card.dataset.prompt;
                 UI.elements.messageInput.value = prompt;
@@ -217,7 +217,7 @@ const App = {
      * Eliminar conversación
      */
     deleteChat(chatId) {
-        if (confirm('¿Eliminar esta conversación?')) {
+        if (confirm('¿Eliminar este caso?')) {
             Storage.deleteChat(chatId);
             
             // Also delete from Firestore
@@ -247,7 +247,7 @@ const App = {
             UI.setChatTitle(chat.title);
             UI.renderMessages(chat.messages);
         } else {
-            UI.setChatTitle('Nueva conversación');
+            UI.setChatTitle('Nuevo caso');
             UI.renderMessages([]);
         }
     },
@@ -258,7 +258,61 @@ const App = {
     renderChatHistory() {
         const chats = Storage.getChats();
         UI.renderChatHistory(chats, this.currentChatId);
+        this.updateRecentCases(chats);
     },
+
+    /**
+     * Actualizar casos recientes en dashboard
+     */
+    updateRecentCases(chats) {
+        const grid = document.getElementById('recentCasesGrid');
+        const section = document.getElementById('recentCasesSection');
+        if (!grid || !section) return;
+
+        // Filter chats that have messages
+        const activeCases = (chats || Storage.getChats())
+            .filter(c => c.messages && c.messages.length > 0)
+            .slice(0, 3);
+
+        if (activeCases.length === 0) {
+            grid.innerHTML = '<p class="no-cases-msg">Aún no tienes casos activos.</p>';
+            return;
+        }
+
+        grid.innerHTML = activeCases.map(chat => {
+            const lastMsg = chat.messages[chat.messages.length - 1];
+            const preview = lastMsg ? lastMsg.content.substring(0, 80) + (lastMsg.content.length > 80 ? '...' : '') : '';
+            const date = chat.updatedAt ? new Date(chat.updatedAt).toLocaleDateString('es-CL', { day: 'numeric', month: 'short' }) : '';
+            const status = chat.messages.length > 0 ? 'Activo' : 'Nuevo';
+            
+            return `
+                <div class="case-card" data-chat-id="${chat.id}">
+                    <div class="case-card-title">${this.escapeHtml(chat.title)}</div>
+                    <div class="case-card-preview">${this.escapeHtml(preview)}</div>
+                    <div class="case-card-meta">
+                        <span>${date}</span>
+                        <span class="case-card-status">${status}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Click handlers
+        grid.querySelectorAll('.case-card').forEach(card => {
+            card.addEventListener('click', () => {
+                this.loadChat(card.dataset.chatId);
+            });
+        });
+    },
+
+    /**
+     * Escape HTML
+     */
+    escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    },
+
 
     /**
      * Enviar mensaje

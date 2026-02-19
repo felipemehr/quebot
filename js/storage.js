@@ -75,7 +75,7 @@ const Storage = {
     /**
      * Crear nuevo chat
      */
-    createChat(title = 'Nueva conversación') {
+    createChat(title = 'Nuevo caso') {
         const chats = this.getChats();
         const newChat = {
             id: this.generateId(),
