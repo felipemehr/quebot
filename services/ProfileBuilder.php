@@ -6,7 +6,7 @@
  */
 class ProfileBuilder {
     private string $apiKey;
-    private string $model = 'claude-3-5-haiku-20241022';
+    private string $model = 'claude-3-haiku-20240307';
     private string $apiUrl = 'https://api.anthropic.com/v1/messages';
     private int $timeout = 8;
 
