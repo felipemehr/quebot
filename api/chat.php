@@ -4,9 +4,15 @@ require_once __DIR__ . '/search.php';
 require_once __DIR__ . '/../services/legal/LegalSearch.php';
 
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+
+// === CORS VALIDATION ===
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (in_array($origin, ALLOWED_ORIGINS)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+}
+// If origin not in allowlist, no CORS headers → browser blocks response
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -25,6 +31,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['status'])) {
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['error' => 'Method not allowed']);
+    exit;
+}
+
+// === RATE LIMITING (file-based with flock) ===
+function checkRateLimit(string $identifier): bool {
+    $dir = sys_get_temp_dir() . '/quebot_ratelimit';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    
+    $file = $dir . '/' . md5($identifier);
+    $now = time();
+    $window = 60; // 1 minute
+    
+    $fp = @fopen($file, 'c+');
+    if (!$fp) return true; // fail open — don't block on filesystem errors
+    
+    flock($fp, LOCK_EX);
+    $content = stream_get_contents($fp);
+    $timestamps = $content ? (json_decode($content, true) ?: []) : [];
+    
+    // Remove entries older than window
+    $timestamps = array_values(array_filter($timestamps, fn($t) => $t > $now - $window));
+    
+    if (count($timestamps) >= RATE_LIMIT_PER_MINUTE) {
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        return false;
+    }
+    
+    $timestamps[] = $now;
+    ftruncate($fp, 0);
+    rewind($fp);
+    fwrite($fp, json_encode($timestamps));
+    flock($fp, LOCK_UN);
+    fclose($fp);
+    return true;
+}
+
+// Determine rate limit identifier (IP or forwarded IP)
+$clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+// Take first IP if comma-separated (X-Forwarded-For can have multiple)
+$clientIp = trim(explode(',', $clientIp)[0]);
+
+if (!checkRateLimit($clientIp)) {
+    http_response_code(429);
+    echo json_encode(['error' => 'Rate limit exceeded. Max ' . RATE_LIMIT_PER_MINUTE . ' requests per minute.']);
     exit;
 }
 
