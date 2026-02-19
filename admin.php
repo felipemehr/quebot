@@ -274,7 +274,9 @@ function renderTable() {
             break;
     }
     
-    const availCols = cols.filter(c => data.some(row => row[c] !== undefined && row[c] !== ''));
+    // Computed columns always shown regardless of data
+    const computedCols = ['tipo', 'casos', 'perfil', 'messages'];
+    const availCols = cols.filter(c => computedCols.includes(c) || data.some(row => row[c] !== undefined && row[c] !== ''));
     
     let html = '<table><thead><tr>';
     availCols.forEach(c => html += `<th>${c}</th>`);
@@ -403,7 +405,7 @@ function showProfile(userId) {
                 budget: '💰 Presupuesto',
                 min_area_m2: '📐 Área mínima (m²)',
                 purpose: '🎯 Propósito',
-                family_info: '👨\u200d👩\u200d👧 Info familiar',
+                family_info: '👨‍👩‍👧 Info familiar',
                 key_requirements: '📋 Requisitos clave',
                 top_searches: '🔍 Búsquedas principales'
             };
