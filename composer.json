@@ -1,0 +1,9 @@
+{
+    "require": {
+        "ext-pdo_pgsql": "*",
+        "ext-pgsql": "*",
+        "ext-mbstring": "*",
+        "ext-xml": "*",
+        "ext-curl": "*"
+    }
+}
