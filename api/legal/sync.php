@@ -22,7 +22,7 @@ if ($providedToken !== $adminToken) {
     exit;
 }
 
-require_once __DIR__ . '/../services/legal/LegalSync.php';
+require_once __DIR__ . '/../../services/legal/LegalSync.php';
 
 try {
     $sync = new LegalSync();

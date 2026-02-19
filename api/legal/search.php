@@ -7,7 +7,7 @@
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
-require_once __DIR__ . '/../services/legal/database.php';
+require_once __DIR__ . '/../../services/legal/database.php';
 
 $query = $_GET['q'] ?? '';
 $limit = min((int)($_GET['limit'] ?? 20), 100);

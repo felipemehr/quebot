@@ -22,10 +22,10 @@ if ($providedToken !== $adminToken) {
     exit;
 }
 
-require_once __DIR__ . '/../services/legal/database.php';
+require_once __DIR__ . '/../../services/legal/database.php';
 
 try {
-    $migrationsDir = __DIR__ . '/../services/legal/migrations';
+    $migrationsDir = __DIR__ . '/../../services/legal/migrations';
     $files = glob($migrationsDir . '/*.sql');
     sort($files);
     

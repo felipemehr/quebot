@@ -7,7 +7,7 @@
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
-require_once __DIR__ . '/../services/legal/database.php';
+require_once __DIR__ . '/../../services/legal/database.php';
 
 try {
     $stats = LegalDatabase::getStats();
