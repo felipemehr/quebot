@@ -18,10 +18,8 @@ const App = {
 
         // Set initial sidebar state based on screen width
         if (window.innerWidth <= 768) {
-            // Mobile: sidebar hidden
             UI.elements.sidebar.classList.remove('open');
         } else {
-            // Desktop: sidebar visible (default state in CSS)
             UI.elements.sidebar.classList.remove('collapsed');
         }
 
@@ -63,7 +61,7 @@ const App = {
 
         const cloudConversations = await queBotAuth.loadConversations();
         if (cloudConversations) {
-            console.log('Loaded conversations from Firebase');
+            console.log('Loaded', cloudConversations.length, 'cases from Firebase');
         }
     },
 
@@ -151,7 +149,6 @@ const App = {
         // Handle window resize
         window.addEventListener('resize', () => {
             if (window.innerWidth > 768) {
-                // Desktop: remove overlay, show sidebar normally
                 if (UI.elements.sidebarOverlay) {
                     UI.elements.sidebarOverlay.classList.remove('visible');
                 }
@@ -223,6 +220,11 @@ const App = {
         if (confirm('¿Eliminar esta conversación?')) {
             Storage.deleteChat(chatId);
             
+            // Also delete from Firestore
+            if (typeof queBotAuth !== 'undefined' && queBotAuth.initialized) {
+                queBotAuth.deleteConversation(chatId);
+            }
+            
             if (chatId === this.currentChatId) {
                 const chats = Storage.getChats();
                 if (chats.length > 0) {
@@ -285,11 +287,24 @@ const App = {
         UI.appendMessage({ ...userMessage, id: Date.now(), timestamp: new Date().toISOString() }, true);
         UI.clearInput();
 
+        // Ensure Firestore case exists and save user message
+        if (typeof queBotAuth !== 'undefined' && queBotAuth.initialized) {
+            const chat = Storage.getChat(this.currentChatId);
+            await queBotAuth.ensureCase(this.currentChatId, chat ? chat.title : null);
+            const msgId = await queBotAuth.saveMessageToCase(this.currentChatId, 'user', content);
+            // Store message ID for run tracking
+            this._lastUserMessageId = msgId;
+        }
+
         // Actualizar título si es el primer mensaje
         const chat = Storage.getChat(this.currentChatId);
         if (chat.messages.length === 1) {
             UI.setChatTitle(chat.title);
             this.renderChatHistory();
+            // Update case title in Firestore
+            if (typeof queBotAuth !== 'undefined' && queBotAuth.caseMap[this.currentChatId]) {
+                queBotDB.updateCase(queBotAuth.caseMap[this.currentChatId], { title: chat.title });
+            }
         }
 
         // Mostrar indicador de typing
@@ -324,20 +339,20 @@ const App = {
                 if (vizData) this.lastVizData = vizData;
             },
             // onComplete
-            (finalContent, vizData) => {
+            (finalContent, vizData, metadata) => {
                 UI.removeTypingIndicator();
                 if (!messageAppended) {
                     UI.appendMessage({ ...assistantMessage, content: finalContent }, true);
                 }
 
-                // Guardar mensaje del asistente
+                // Guardar mensaje del asistente en localStorage
                 Storage.addMessage(this.currentChatId, {
                     role: 'assistant',
                     content: finalContent
                 });
 
-                // Save to Firebase if authenticated
-                this.saveToFirebase();
+                // Save to Firebase: message + run + events
+                this.saveToFirebase(finalContent, metadata);
 
                 this.isProcessing = false;
                 UI.setInputEnabled(true);
@@ -349,16 +364,33 @@ const App = {
                 UI.showToast(error, 'error');
                 this.isProcessing = false;
                 UI.setInputEnabled(true);
+
+                // Log error event
+                if (typeof queBotAuth !== 'undefined' && queBotAuth.initialized) {
+                    const caseId = queBotAuth.caseMap[this.currentChatId];
+                    if (caseId && typeof queBotDB !== 'undefined' && queBotDB.isReady()) {
+                        queBotDB.logEvent(caseId, null, 'ERROR', { message: error });
+                    }
+                }
             }
         );
     },
 
     /**
-     * Save current chat to Firebase
+     * Save assistant response + run metadata to Firebase
      */
-    async saveToFirebase() {
+    async saveToFirebase(assistantContent, metadata) {
         if (typeof queBotAuth === 'undefined' || !queBotAuth.initialized) return;
         
+        // Save assistant message
+        await queBotAuth.saveMessageToCase(this.currentChatId, 'assistant', assistantContent);
+        
+        // Log run with metadata (timing, tokens, cost)
+        if (metadata && Object.keys(metadata).length > 0) {
+            await queBotAuth.logRun(this.currentChatId, this._lastUserMessageId, metadata);
+        }
+
+        // Legacy save
         const chat = Storage.getChat(this.currentChatId);
         if (chat) {
             await queBotAuth.saveConversation(

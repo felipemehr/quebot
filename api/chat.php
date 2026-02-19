@@ -28,6 +28,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+// === START TIMING ===
+$startTime = microtime(true);
+
 $input = json_decode(file_get_contents('php://input'), true);
 $message = $input['message'] ?? '';
 $conversationHistory = $input['history'] ?? [];
@@ -44,9 +47,7 @@ if (empty($message)) {
  * Sanitize text for JSON encoding - remove invalid UTF-8 sequences
  */
 function sanitizeUtf8(string $text): string {
-    // Remove invalid UTF-8 sequences
     $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
-    // Remove null bytes and other control characters (keep newlines/tabs)
     $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
     return $text;
 }
@@ -120,6 +121,7 @@ if ($ufData) {
 
 // --- Perform web search if needed ---
 $searchContext = '';
+$ragStartTime = microtime(true);
 if ($shouldSearch) {
     $results = searchDuckDuckGo($searchQuery);
     
@@ -162,6 +164,7 @@ try {
 } catch (Exception $e) {
     error_log("Legal search failed: " . $e->getMessage());
 }
+$ragEndTime = microtime(true);
 
 // --- Build messages for Claude ---
 $systemPrompt = SYSTEM_PROMPT . $ufContext;
@@ -193,6 +196,8 @@ $messages[] = [
 ];
 
 // --- Call Claude API ---
+$llmStartTime = microtime(true);
+
 $apiData = [
     'model' => MODEL,
     'max_tokens' => MAX_TOKENS,
@@ -225,6 +230,8 @@ $response = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 
+$llmEndTime = microtime(true);
+
 if ($httpCode !== 200) {
     http_response_code(500);
     echo json_encode(['error' => 'API error', 'details' => $response]);
@@ -234,11 +241,32 @@ if ($httpCode !== 200) {
 $data = json_decode($response, true);
 $reply = $data['content'][0]['text'] ?? 'Sin respuesta';
 
+// === TIMING & METADATA ===
+$endTime = microtime(true);
+$timingTotal = round(($endTime - $startTime) * 1000);
+$timingRag = round(($ragEndTime - $ragStartTime) * 1000);
+$timingLlm = round(($llmEndTime - $llmStartTime) * 1000);
+
+$inputTokens = $data['usage']['input_tokens'] ?? 0;
+$outputTokens = $data['usage']['output_tokens'] ?? 0;
+
+// Cost estimate (Claude Sonnet pricing: $3/MTok input, $15/MTok output)
+$costEstimate = ($inputTokens * 3 / 1000000) + ($outputTokens * 15 / 1000000);
+
 echo json_encode([
     'response' => $reply,
     'searched' => $shouldSearch,
     'searchQuery' => $shouldSearch ? $searchQuery : null,
     'ufValue' => $ufData ? $ufData['formatted'] : null,
-    'legalResults' => !empty($legalContext)
+    'legalResults' => !empty($legalContext),
+    'metadata' => [
+        'model' => MODEL,
+        'input_tokens' => $inputTokens,
+        'output_tokens' => $outputTokens,
+        'cost_estimate' => round($costEstimate, 6),
+        'timing_total' => $timingTotal,
+        'timing_rag' => $timingRag,
+        'timing_llm' => $timingLlm
+    ]
 ], JSON_UNESCAPED_UNICODE);
 ?>
