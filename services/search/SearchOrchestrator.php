@@ -15,6 +15,7 @@ require_once __DIR__ . '/HeuristicRanker.php';
 require_once __DIR__ . '/LLMReranker.php';
 require_once __DIR__ . '/SearchCache.php';
 require_once __DIR__ . '/providers/DuckDuckGoHtmlProvider.php';
+require_once __DIR__ . '/providers/SerpApiProvider.php';
 
 class SearchOrchestrator {
     private array $providers = [];
@@ -29,6 +30,15 @@ class SearchOrchestrator {
 
         // Register default provider
         $this->registerProvider(new DuckDuckGoHtmlProvider());
+
+        // Auto-register SERP API if key is available
+        $serpApiKey = getenv('SERPAPI_KEY') ?: '';
+        if (!empty($serpApiKey)) {
+            $serpProvider = new SerpApiProvider($serpApiKey);
+            if ($serpProvider->isAvailable()) {
+                $this->registerProvider($serpProvider);
+            }
+        }
     }
 
     public function registerProvider(object $provider): void {
@@ -44,7 +54,8 @@ class SearchOrchestrator {
 
     /**
      * Get the preferred provider for a vertical.
-     * Override in subclass or via setProviderPreference() for SERP API etc.
+     * If SERP API is registered, prefer it for news, retail, real_estate.
+     * DuckDuckGo is fallback for everything.
      */
     public function getPreferredProvider(string $vertical): object {
         // If SERP API is registered and available, prefer it for certain verticals
@@ -112,6 +123,22 @@ class SearchOrchestrator {
                 if (!isset($seenUrls[$normUrl])) {
                     $allResults[] = $r;
                     $seenUrls[$normUrl] = true;
+                }
+            }
+        }
+
+        // 4b) If primary provider returned nothing, try DuckDuckGo fallback
+        if (empty($allResults) && $providerName !== 'duckduckgo' && isset($this->providers['duckduckgo'])) {
+            $provider = $this->providers['duckduckgo'];
+            $providerName = 'duckduckgo (fallback)';
+            foreach ($queries as $q) {
+                $raw = $provider->search($q, $maxResults);
+                foreach ($raw as $r) {
+                    $normUrl = rtrim($r['url'] ?? '', '/');
+                    if (!isset($seenUrls[$normUrl])) {
+                        $allResults[] = $r;
+                        $seenUrls[$normUrl] = true;
+                    }
                 }
             }
         }
