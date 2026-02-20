@@ -261,6 +261,79 @@ class QueBotAuth {
     }
   }
 
+
+  // === Case Management Methods ===
+  
+  // Map of caseId -> Firestore doc created
+  get caseMap() {
+    if (!this._caseMap) this._caseMap = {};
+    return this._caseMap;
+  }
+
+  async ensureCase(caseId, title) {
+    if (!this.currentUser || !this.db || !caseId) return;
+    if (this.caseMap[caseId]) return; // Already created
+    try {
+      await this.db.collection('cases').doc(caseId).set({
+        case_id: caseId,
+        user_id: this.currentUser.uid,
+        tenant_id: 'quebot',
+        status: 'open',
+        channel: 'web',
+        created_at: firebase.firestore.FieldValue.serverTimestamp(),
+        title: title || 'Nueva Misión'
+      }, { merge: true });
+      this.caseMap[caseId] = true;
+    } catch (error) {
+      console.error('ensureCase error:', error);
+    }
+  }
+
+  async saveMessageToCase(caseId, role, text) {
+    if (!this.currentUser || !this.db || !caseId) return null;
+    try {
+      const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      await this.db.collection('messages').doc(msgId).set({
+        message_id: msgId,
+        case_id: caseId,
+        role: role,
+        text: text,
+        created_at: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      return msgId;
+    } catch (error) {
+      console.error('saveMessageToCase error:', error);
+      return null;
+    }
+  }
+
+  async logRun(runData) {
+    if (!this.currentUser || !this.db) return null;
+    try {
+      const runId = 'run_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      await this.db.collection('runs').doc(runId).set({
+        run_id: runId,
+        ...runData,
+        created_at: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      return runId;
+    } catch (error) {
+      console.error('logRun error:', error);
+      return null;
+    }
+  }
+
+  async deleteConversation(conversationId) {
+    if (!this.currentUser || !this.db) return;
+    try {
+      // Delete the case doc
+      await this.db.collection('cases').doc(conversationId).delete();
+      delete this.caseMap[conversationId];
+    } catch (error) {
+      console.error('deleteConversation error:', error);
+    }
+  }
+
   getUserLevel() {
     return this.userProfile?.level || USER_LEVEL.ANONYMOUS;
   }
