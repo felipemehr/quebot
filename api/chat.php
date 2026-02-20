@@ -743,7 +743,8 @@ echo json_encode([
     'ufValue' => $ufData ? $ufData['formatted'] : null,
     'legalResults' => !empty($legalContext),
     'metadata' => [
-        'model' => MODEL,
+        'model' => $modelUsed,
+        'fallback_used' => $usedFallback,
         'input_tokens' => $inputTokens,
         'output_tokens' => $outputTokens,
         'cost_estimate' => round($costEstimate, 6),
