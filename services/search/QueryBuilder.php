@@ -77,6 +77,7 @@ class QueryBuilder {
 
         return [
             'queries' => $queries,
+            'context_queries' => [],
             'cleaned_query' => $cleaned,
             'vertical' => $vertical,
             'intent' => null,
@@ -111,6 +112,12 @@ class QueryBuilder {
         $baseTerms[] = $operation;
         if ($location) {
             $baseTerms[] = $location;
+        }
+
+        // Add location qualifier to queries (barrio alto, sector exclusivo, etc.)
+        $qualifier = $intent['location_qualifier_raw'] ?? $intent['location_qualifier'] ?? null;
+        if ($qualifier) {
+            $baseTerms[] = $qualifier;
         }
 
         // Add surface hint if present
@@ -200,10 +207,54 @@ class QueryBuilder {
 
         return [
             'queries' => $queries,
+            'context_queries' => self::buildContextQueries($intent),
             'cleaned_query' => $cleaned,
             'vertical' => 'real_estate',
             'intent' => $intent,
         ];
+    }
+
+
+    /**
+     * Build context queries about neighborhoods/city for enriched search.
+     * Runs in parallel with property queries to give Claude urban context.
+     *
+     * @return string[] Context search queries (max 2)
+     */
+    private static function buildContextQueries(array $intent): array {
+        $location = $intent['ubicacion'] ?? null;
+        if (!$location) return [];
+
+        $queries = [];
+        $qualifier = $intent['location_qualifier'] ?? null;
+
+        // Query 1: Best neighborhoods for the qualifier
+        if ($qualifier) {
+            $qualifierTerms = match($qualifier) {
+                'sector alto' => 'mejores barrios sector alto exclusivo',
+                'sector exclusivo' => 'barrios exclusivos premium',
+                'zona residencial' => 'mejores sectores residenciales',
+                'condominio' => 'condominios cerrados exclusivos',
+                'mejor zona' => 'mejores barrios para vivir',
+                'zona segura' => 'barrios más seguros',
+                default => 'mejores barrios sectores',
+            };
+            $queries[] = "{$qualifierTerms} {$location} Chile";
+        } else {
+            // Even without qualifier, get general neighborhood info
+            $queries[] = "mejores barrios sectores {$location} Chile donde vivir";
+        }
+
+        // Query 2: Real estate price context for the area
+        $type = $intent['tipo_propiedad'] ?? 'propiedad';
+        $budget = '';
+        if ($intent['presupuesto']) {
+            $b = $intent['presupuesto'];
+            $budget = " {$b['amount']} {$b['unit']}";
+        }
+        $queries[] = "precios {$type} {$location}{$budget} mercado inmobiliario Chile";
+
+        return array_slice($queries, 0, 2);
     }
 
     private static function cleanQuery(string $query, string $vertical): string {

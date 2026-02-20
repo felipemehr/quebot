@@ -153,6 +153,7 @@ class IntentParser {
      *   presupuesto: ?array,
      *   superficie: ?array,
      *   must_have: string[],
+ *   location_qualifier: ?string,
      *   operacion: string,
      *   dormitorios: ?int,
      *   banos: ?int,
@@ -172,6 +173,7 @@ class IntentParser {
             'presupuesto' => null,
             'superficie' => null,
             'must_have' => [],
+            'location_qualifier' => null,  // barrio alto, sector exclusivo, etc.
             'operacion' => 'venta', // default
             'dormitorios' => null,
             'banos' => null,
@@ -293,6 +295,26 @@ class IntentParser {
             $intent['fallback_questions'][] = '¿Qué tipo de propiedad te interesa? (casa, departamento, parcela, terreno)';
         }
 
+
+        // --- Location qualifier (barrio alto, sector exclusivo, etc.) ---
+        $qualifierPatterns = [
+            '/\b(?:barrio|sector)\s+alto\b/i' => 'sector alto',
+            '/\b(?:barrio|sector)\s+(?:exclusiv|premium|residencial)\w*\b/i' => 'sector exclusivo',
+            '/\b(?:barrio|zona)\s+(?:tranquil|residencial)\w*\b/i' => 'zona residencial',
+            '/\bcondominio\s*(?:cerrado)?\b/i' => 'condominio',
+            '/\b(?:sector|barrio)\s+(?:oriente|poniente|norte|sur|centro)\b/i' => 'sector orientación',
+            '/\b(?:buena|mejor)(?:es)?\s+(?:zona|barrio|sector)\b/i' => 'mejor zona',
+            '/\b(?:zona|sector)\s+(?:segur|tranquil)\w*\b/i' => 'zona segura',
+        ];
+        foreach ($qualifierPatterns as $pattern => $label) {
+            if (preg_match($pattern, $q, $qm)) {
+                $intent['location_qualifier'] = $label;
+                // Extract the matched text for query enrichment
+                $intent['location_qualifier_raw'] = trim($qm[0]);
+                break;
+            }
+        }
+
         // --- Confidence score ---
         $score = 0.0;
         if ($intent['tipo_propiedad']) $score += 0.3;
@@ -300,6 +322,7 @@ class IntentParser {
         if ($intent['presupuesto']) $score += 0.15;
         if ($intent['superficie']) $score += 0.1;
         if (!empty($intent['must_have'])) $score += 0.05;
+        if ($intent['location_qualifier']) $score += 0.05;
         if ($intent['dormitorios'] || $intent['banos']) $score += 0.1;
         $intent['confidence'] = round($score, 2);
 
@@ -346,6 +369,9 @@ class IntentParser {
             } else {
                 $parts[] = 'hasta ' . number_format($amount, 0, ',', '.') . ' UF';
             }
+        }
+        if ($intent['location_qualifier']) {
+            $parts[] = '(' . $intent['location_qualifier'] . ')';
         }
         if (!empty($intent['must_have'])) {
             $parts[] = 'con ' . implode(', ', $intent['must_have']);

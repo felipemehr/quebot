@@ -86,6 +86,7 @@ class SearchOrchestrator {
         $queries = $queryData['queries'];
         $cleanedQuery = $queryData['cleaned_query'];
         $intent = $queryData['intent'] ?? null;
+        $contextQueries = $queryData['context_queries'] ?? [];
 
         // Step 2: Cache check
         $cacheKey = $queries[0] ?? $cleanedQuery;
@@ -135,6 +136,34 @@ class SearchOrchestrator {
                     }
                 }
             }
+        }
+
+        // Step 3.5: Run context queries in parallel (neighborhood/city info)
+        $contextResults = [];
+        if (!empty($contextQueries) && $vertical === 'real_estate') {
+            $contextProvider = $this->getPreferredProvider('general');
+            if (method_exists($contextProvider, 'searchParallel')) {
+                $contextRaw = $contextProvider->searchParallel($contextQueries, 5);
+            } else {
+                $contextRaw = [];
+                foreach ($contextQueries as $cq) {
+                    $contextRaw = array_merge($contextRaw, $contextProvider->search($cq, 5));
+                }
+            }
+            // Extract snippets for context (we don't rank these, just use snippets)
+            foreach ($contextRaw as $cr) {
+                $snippet = $cr['snippet'] ?? $cr['description'] ?? '';
+                $title = $cr['title'] ?? '';
+                if ($snippet || $title) {
+                    $contextResults[] = [
+                        'title' => $title,
+                        'snippet' => $snippet,
+                        'url' => $cr['url'] ?? '',
+                    ];
+                }
+            }
+            // Limit to top 8 context snippets
+            $contextResults = array_slice($contextResults, 0, 8);
         }
 
         // Step 4: Validate + extract structured data
@@ -219,7 +248,8 @@ class SearchOrchestrator {
         // Step 10: Build LLM context
         $contextForLLM = $this->buildLLMContext(
             $ranked, $userMessage, $vertical, $intent,
-            $insufficient, $expansionSuggestions, $validListings
+            $insufficient, $expansionSuggestions, $validListings,
+            $contextResults
         );
 
         // Build diagnostics
@@ -229,6 +259,8 @@ class SearchOrchestrator {
             'valid_listings' => $validListings,
             'insufficient' => $insufficient,
             'queries_sent' => count($searchQueries),
+            'context_queries_sent' => count($contextQueries),
+            'context_results' => count($contextResults),
             'scraped_pages' => $scraped,
         ];
 
@@ -237,6 +269,7 @@ class SearchOrchestrator {
             'vertical' => $vertical,
             'intent' => $intent,
             'queries_used' => $searchQueries,
+            'context_queries_used' => $contextQueries,
             'provider_used' => $providerName,
             'cached' => false,
             'total_results' => count($ranked),
@@ -319,7 +352,7 @@ class SearchOrchestrator {
     private function buildLLMContext(
         array $results, string $query, string $vertical,
         ?array $intent, bool $insufficient, array $expansionSuggestions,
-        int $validListings
+        int $validListings, array $contextResults = []
     ): string {
         // === INTENT SUMMARY ===
         $ctx = "\n\n";
@@ -373,6 +406,25 @@ class SearchOrchestrator {
         }
 
         $ctx .= "🔍 RESULTADOS DE BÚSQUEDA para \"{$query}\" (vertical: {$vertical}):\n\n";
+
+
+        // === URBAN CONTEXT (neighborhood/city intelligence) ===
+        if (!empty($contextResults)) {
+            $ctx .= "🏘️ CONTEXTO URBANO Y DE MERCADO (usa esta info para evaluar ubicación y relevancia):\n";
+            foreach ($contextResults as $i => $cr) {
+                $ctx .= "  " . ($i + 1) . ". {$cr['title']}\n";
+                if ($cr['snippet']) {
+                    $ctx .= "     {$cr['snippet']}\n";
+                }
+            }
+            $ctx .= "\n";
+            $ctx .= "INSTRUCCIÓN: Usa el contexto urbano para:\n";
+            $ctx .= "- Identificar qué barrios/sectores coinciden con lo que pide el usuario\n";
+            $ctx .= "- Evaluar si las propiedades encontradas están en zonas relevantes\n";
+            $ctx .= "- Informar al usuario sobre barrios específicos que coinciden con su búsqueda\n";
+            $ctx .= "- Si las propiedades no están en barrios que coincidan, dilo honestamente\n";
+            $ctx .= "\n";
+        }
 
         // === CRITICAL RULES ===
         $ctx .= "═══════════════════════════════════════════\n";
