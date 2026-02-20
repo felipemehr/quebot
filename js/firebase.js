@@ -23,32 +23,26 @@ class QueBotAuth {
     this.db = null;
     this.currentUser = null;
     this.userProfile = null;
-    this.searchProfile = null;
     this.messageCount = 0;
     this.hasAskedForRegistration = false;
     this.initialized = false;
-    // Map localStorage chatId -> Firestore caseId
-    this.caseMap = {};
   }
 
   async init() {
     try {
+      // Initialize Firebase
       this.app = firebase.initializeApp(firebaseConfig);
       this.auth = firebase.auth();
       this.db = firebase.firestore();
       
-      // Initialize QueBotDatabase with Firestore
-      if (typeof queBotDB !== 'undefined') {
-        queBotDB.init(this.db);
-      }
-      
+      // Listen for auth state changes
       this.auth.onAuthStateChanged(async (user) => {
         if (user) {
           this.currentUser = user;
           await this.loadUserProfile();
-        await this.loadSearchProfile();
           this.updateUI();
         } else {
+          // Sign in anonymously by default
           await this.signInAnonymously();
         }
       });
@@ -57,6 +51,7 @@ class QueBotAuth {
       console.log('Firebase initialized successfully');
     } catch (error) {
       console.error('Firebase init error:', error);
+      // Fallback to localStorage only
       this.initialized = false;
     }
   }
@@ -69,12 +64,6 @@ class QueBotAuth {
         level: USER_LEVEL.ANONYMOUS,
         createdAt: new Date().toISOString()
       };
-      // Save anonymous user to Firestore
-      if (typeof queBotDB !== 'undefined' && queBotDB.isReady()) {
-        await queBotDB.saveUser(this.currentUser.uid, {
-          level: USER_LEVEL.ANONYMOUS
-        });
-      }
       console.log('Signed in anonymously');
     } catch (error) {
       console.error('Anonymous sign in error:', error);
@@ -90,21 +79,15 @@ class QueBotAuth {
       // Close modal immediately after successful login
       this.hideAuthModal();
       
-      // Save full user profile to Firestore via queBotDB
-      const profileData = {
+      // Create/update full user profile
+      await this.saveUserProfile({
         level: USER_LEVEL.FULL,
         name: result.user.displayName,
         email: result.user.email,
         photoURL: result.user.photoURL,
-        provider: 'google'
-      };
-
-      if (typeof queBotDB !== 'undefined' && queBotDB.isReady()) {
-        await queBotDB.saveUser(this.currentUser.uid, profileData);
-      }
-
-      // Also save to legacy profile
-      await this.saveUserProfile(profileData);
+        provider: 'google',
+        updatedAt: new Date().toISOString()
+      });
       
       this.updateUI();
       return { success: true, user: result.user };
@@ -124,10 +107,6 @@ class QueBotAuth {
         updatedAt: new Date().toISOString()
       };
       
-      if (typeof queBotDB !== 'undefined' && queBotDB.isReady() && this.currentUser) {
-        await queBotDB.saveUser(this.currentUser.uid, profile);
-      }
-      
       await this.saveUserProfile(profile);
       this.updateUI();
       return { success: true };
@@ -141,18 +120,6 @@ class QueBotAuth {
     if (!this.currentUser || !this.db) return;
     
     try {
-      // Try new users collection first
-      if (typeof queBotDB !== 'undefined' && queBotDB.isReady()) {
-        const userData = await queBotDB.getUser(this.currentUser.uid);
-        if (userData) {
-          this.userProfile = userData;
-          // Update last_seen
-          await queBotDB.saveUser(this.currentUser.uid, { level: userData.level });
-          return;
-        }
-      }
-
-      // Fallback to legacy collection
       const doc = await this.db.collection('users').doc(this.currentUser.uid).get();
       if (doc.exists) {
         this.userProfile = doc.data();
@@ -174,88 +141,26 @@ class QueBotAuth {
     try {
       this.userProfile = { ...this.userProfile, ...profile };
       await this.db.collection('users').doc(this.currentUser.uid).set(this.userProfile, { merge: true });
+      console.log('Profile saved:', this.userProfile);
     } catch (error) {
       console.error('Save profile error:', error);
     }
   }
 
-  // Get or create a Firestore case for a localStorage chat
-  async ensureCase(localChatId, title) {
-    if (!this.currentUser || !queBotDB || !queBotDB.isReady()) return null;
-    if (this.userProfile && this.userProfile.level === USER_LEVEL.ANONYMOUS) return null;
-
-    if (this.caseMap[localChatId]) {
-      return this.caseMap[localChatId];
-    }
-
-    try {
-      const caseId = await queBotDB.createCase(
-        this.currentUser.uid,
-        'web',
-        title || 'Nueva conversación'
-      );
-      if (caseId) {
-        this.caseMap[localChatId] = caseId;
-      }
-      return caseId;
-    } catch (e) {
-      console.error('Ensure case error:', e);
-      return null;
-    }
-  }
-
-  // Save a message to the Firestore case
-  async saveMessageToCase(localChatId, role, text) {
-    const caseId = this.caseMap[localChatId];
-    if (!caseId || !queBotDB || !queBotDB.isReady()) return null;
-    
-    try {
-      return await queBotDB.addMessage(caseId, role, text);
-    } catch (e) {
-      console.error('Save message to case error:', e);
-      return null;
-    }
-  }
-
-  // Log a run with metadata
-  async logRun(localChatId, triggerMessageId, metadata) {
-    const caseId = this.caseMap[localChatId];
-    if (!caseId || !queBotDB || !queBotDB.isReady()) return null;
-    
-    try {
-      const runId = await queBotDB.createRun(caseId, triggerMessageId, metadata);
-      // Also log an LLM_CALL event
-      if (runId) {
-        await queBotDB.logEvent(caseId, runId, 'LLM_CALL', {
-          model: metadata.model,
-          tokens: (metadata.input_tokens || 0) + (metadata.output_tokens || 0),
-          timing_ms: metadata.timing_total
-        });
-        if (metadata.searched) {
-          await queBotDB.logEvent(caseId, runId, 'RAG_SEARCH', {
-            timing_ms: metadata.timing_rag
-          });
-        }
-        if (metadata.legal_used) {
-          await queBotDB.logEvent(caseId, runId, 'LEGAL_RAG', {});
-        }
-      }
-      return runId;
-    } catch (e) {
-      console.error('Log run error:', e);
-      return null;
-    }
-  }
-
-  // Save conversation to Firestore (backward compatibility)
+  // Save conversation to Firestore
   async saveConversation(conversationId, messages, title) {
     if (!this.currentUser || !this.db || this.userProfile?.level === USER_LEVEL.ANONYMOUS) {
+      // For anonymous users, use localStorage only
       return false;
     }
     
     try {
-      // Ensure case exists for this chat
-      await this.ensureCase(conversationId, title);
+      await this.db.collection('users').doc(this.currentUser.uid)
+        .collection('conversations').doc(conversationId).set({
+          title: title,
+          messages: messages,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
       return true;
     } catch (error) {
       console.error('Save conversation error:', error);
@@ -266,136 +171,107 @@ class QueBotAuth {
   // Load conversations from Firestore
   async loadConversations() {
     if (!this.currentUser || !this.db || this.userProfile?.level === USER_LEVEL.ANONYMOUS) {
-      return null;
+      return null; // Use localStorage
     }
     
     try {
-      if (typeof queBotDB !== 'undefined' && queBotDB.isReady()) {
-        return await queBotDB.getCases(this.currentUser.uid);
-      }
-      return null;
+      const snapshot = await this.db.collection('users').doc(this.currentUser.uid)
+        .collection('conversations').orderBy('updatedAt', 'desc').get();
+      
+      const conversations = {};
+      snapshot.forEach(doc => {
+        conversations[doc.id] = doc.data();
+      });
+      return conversations;
     } catch (error) {
       console.error('Load conversations error:', error);
       return null;
     }
   }
 
-  // Delete conversation
-  async deleteConversation(conversationId) {
-    const caseId = this.caseMap[conversationId];
-    if (caseId && typeof queBotDB !== 'undefined' && queBotDB.isReady()) {
-      await queBotDB.deleteCase(caseId);
-      delete this.caseMap[conversationId];
-    }
-  }
-
-  // Get user context string for API
-
-  // === SEARCH PROFILE (Memory System B1) ===
-  
-  /**
-   * Get the user's search profile for sending to backend.
-   * Returns cached profile or null if not loaded yet.
-   */
-  getSearchProfile() {
-    return this.searchProfile || null;
-  }
-
-  /**
-   * Save updated search profile from backend response.
-   * Stores in Firestore and local cache.
-   */
-  async saveSearchProfile(profileData) {
-    if (!profileData || !this.currentUser) return;
-    
-    this.searchProfile = profileData;
-    
+  async signOut() {
     try {
-      // Save to Firestore under users/{uid}
-      if (typeof queBotDB !== 'undefined') {
-        await queBotDB.saveUser(this.currentUser.uid, {
-          search_profile: profileData
-        });
-      }
-      console.log('Search profile saved:', Object.keys(profileData).length, 'fields');
+      await this.auth.signOut();
+      this.currentUser = null;
+      this.userProfile = null;
+      this.updateUI();
     } catch (error) {
-      console.error('Save search profile error:', error);
+      console.error('Sign out error:', error);
     }
   }
 
-  /**
-   * Load search profile from Firestore on init.
-   */
-  async loadSearchProfile() {
-    if (!this.currentUser) return;
+  // Check if we should ask for registration (after 4-5 helpful messages)
+  shouldAskForRegistration() {
+    if (this.hasAskedForRegistration) return false;
+    if (this.userProfile?.level !== USER_LEVEL.ANONYMOUS) return false;
+    if (this.messageCount < 4) return false;
     
-    try {
-      if (typeof queBotDB !== 'undefined') {
-        const userData = await queBotDB.getUser(this.currentUser.uid);
-        if (userData && userData.search_profile) {
-          this.searchProfile = userData.search_profile;
-          console.log('Search profile loaded:', Object.keys(this.searchProfile).length, 'fields');
-        }
-      }
-    } catch (error) {
-      console.error('Load search profile error:', error);
-    }
-  }
-
-  getUserContext() {
-    if (!this.userProfile) return '';
-    
-    let context = '';
-    if (this.userProfile.name) {
-      context += `El usuario se llama ${this.userProfile.name}. `;
-    }
-    if (this.userProfile.level === USER_LEVEL.FULL) {
-      context += 'Es un usuario registrado con Google. ';
-    }
-    return context;
+    // 50% chance after 4 messages
+    return Math.random() > 0.5;
   }
 
   incrementMessageCount() {
     this.messageCount++;
   }
 
-  shouldAskForRegistration() {
-    if (this.hasAskedForRegistration) return false;
-    if (this.userProfile && this.userProfile.level !== USER_LEVEL.ANONYMOUS) return false;
-    if (this.messageCount < 5) return false;
-    
+  markAskedForRegistration() {
     this.hasAskedForRegistration = true;
-    return true;
   }
 
-  processRegistrationFromChat(message) {
-    // Not implemented yet
+  getUserLevel() {
+    return this.userProfile?.level || USER_LEVEL.ANONYMOUS;
   }
 
-  // UI Methods
+  getUserName() {
+    return this.userProfile?.name || 'Usuario';
+  }
+
+  getUserContext() {
+    // Return user context for system prompt
+    if (!this.userProfile) return '';
+    
+    let context = '';
+    if (this.userProfile.name) {
+      context += `El usuario se llama ${this.userProfile.name}. `;
+    }
+    if (this.userProfile.level === USER_LEVEL.ANONYMOUS) {
+      context += 'El usuario es anónimo y aún no ha compartido información personal. ';
+    } else if (this.userProfile.level === USER_LEVEL.LIGHT) {
+      context += 'El usuario tiene un registro ligero. ';
+    } else if (this.userProfile.level === USER_LEVEL.FULL) {
+      context += 'El usuario está autenticado completamente con Google. ';
+    }
+    return context;
+  }
+
   updateUI() {
-    const userInfo = document.getElementById('userInfo');
-    if (!userInfo) return;
-
-    if (this.currentUser && !this.currentUser.isAnonymous) {
-      const name = this.userProfile?.name || this.currentUser.displayName || 'Usuario';
-      const photo = this.userProfile?.photoURL || this.currentUser.photoURL;
-      
-      userInfo.innerHTML = `
-        <div class="user-avatar" style="background-image: url('${photo || ''}')">
-          ${!photo ? name.charAt(0).toUpperCase() : ''}
-        </div>
-        <span class="user-name">${name}</span>
-      `;
+    const userAvatar = document.querySelector('.user-avatar');
+    const userName = document.querySelector('.user-name');
+    const userInfo = document.querySelector('.user-info');
+    
+    if (!userAvatar || !userName) return;
+    
+    if (this.userProfile?.level === USER_LEVEL.FULL && this.userProfile.photoURL) {
+      userAvatar.innerHTML = `<img src="${this.userProfile.photoURL}" alt="Avatar" style="width:100%;height:100%;border-radius:50%;">`;
+      userName.textContent = this.userProfile.name || 'Usuario';
+    } else if (this.userProfile?.level === USER_LEVEL.LIGHT && this.userProfile.name) {
+      userAvatar.textContent = this.userProfile.name.charAt(0).toUpperCase();
+      userName.textContent = this.userProfile.name;
     } else {
-      userInfo.innerHTML = `
-        <div class="user-avatar guest">👤</div>
-        <span class="user-name">Invitado</span>
-      `;
+      userAvatar.textContent = '?';
+      userName.textContent = 'Invitado';
+    }
+    
+    // Make user info clickable
+    if (userInfo && !userInfo.hasClickListener) {
+      userInfo.style.cursor = 'pointer';
+      userInfo.addEventListener('click', () => this.showAuthModal());
+      userInfo.hasClickListener = true;
     }
   }
 
   showAuthModal() {
+    // Create modal if not exists
     let modal = document.getElementById('authModal');
     if (!modal) {
       modal = document.createElement('div');
@@ -403,46 +279,123 @@ class QueBotAuth {
       modal.className = 'auth-modal';
       document.body.appendChild(modal);
     }
-
-    modal.innerHTML = `
-      <div class="auth-modal-content">
-        <div class="auth-modal-header">
-          <span class="auth-modal-icon">🤖</span>
-          <h2>¡Bienvenido a QueBot!</h2>
+    
+    const level = this.getUserLevel();
+    let content = '';
+    
+    if (level === USER_LEVEL.FULL) {
+      content = `
+        <div class="auth-modal-content">
+          <h3>👋 Hola, ${this.userProfile.name}!</h3>
+          <p>Conectado con Google</p>
+          <p class="auth-email">${this.userProfile.email}</p>
+          <div class="auth-buttons">
+            <button class="auth-btn secondary" onclick="queBotAuth.signOut(); queBotAuth.hideAuthModal();">Cerrar sesión</button>
+            <button class="auth-btn secondary" onclick="queBotAuth.hideAuthModal();">Cerrar</button>
+          </div>
+        </div>
+      `;
+    } else if (level === USER_LEVEL.LIGHT) {
+      content = `
+        <div class="auth-modal-content">
+          <h3>👋 Hola, ${this.userProfile.name || 'amigo'}!</h3>
+          <p>Tienes un registro ligero</p>
+          <div class="auth-buttons">
+            <button class="auth-btn primary" onclick="queBotAuth.signInWithGoogle().then(() => queBotAuth.hideAuthModal());">Conectar con Google</button>
+            <button class="auth-btn secondary" onclick="queBotAuth.hideAuthModal();">Cerrar</button>
+          </div>
+        </div>
+      `;
+    } else {
+      content = `
+        <div class="auth-modal-content">
+          <h3>🤖 ¡Bienvenido a QueBot!</h3>
           <p>Conéctate para guardar tus conversaciones en la nube</p>
+          <div class="auth-buttons">
+            <button class="auth-btn google" onclick="queBotAuth.signInWithGoogle().then(() => queBotAuth.hideAuthModal());">
+              <svg viewBox="0 0 24 24" width="20" height="20"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+              Continuar con Google
+            </button>
+            <button class="auth-btn secondary" onclick="queBotAuth.hideAuthModal();">Seguir como invitado</button>
+          </div>
+          <p class="auth-note">Tus conversaciones actuales se guardan solo en este navegador</p>
         </div>
-        <div class="auth-modal-buttons">
-          <button class="auth-btn auth-btn-google" onclick="queBotAuth.signInWithGoogle()">
-            <span class="auth-btn-icon">G</span>
-            Continuar con Google
-          </button>
-          <button class="auth-btn auth-btn-guest" onclick="queBotAuth.hideAuthModal()">
-            Seguir como invitado
-          </button>
-        </div>
-        <p class="auth-modal-footer">Tus conversaciones actuales se guardan solo en este navegador</p>
-      </div>
-    `;
-
+      `;
+    }
+    
+    modal.innerHTML = content;
     modal.style.display = 'flex';
     
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        this.hideAuthModal();
-      }
-    });
+    // Close on backdrop click
+    modal.onclick = (e) => {
+      if (e.target === modal) this.hideAuthModal();
+    };
   }
 
   hideAuthModal() {
     const modal = document.getElementById('authModal');
-    if (modal) {
-      modal.style.display = 'none';
+    if (modal) modal.style.display = 'none';
+  }
+
+  // Process registration from chat (when user provides info conversationally)
+  async processRegistrationFromChat(message) {
+    const lowerMsg = message.toLowerCase();
+    
+    // Simple extraction patterns
+    const namePatterns = [
+      /me llamo ([\w\s]+)/i,
+      /mi nombre es ([\w\s]+)/i,
+      /soy ([\w\s]+)/i
+    ];
+    
+    const emailPatterns = [
+      /([\w.-]+@[\w.-]+\.[\w]+)/i
+    ];
+    
+    const phonePatterns = [
+      /([+]?[0-9]{8,12})/
+    ];
+    
+    let updates = {};
+    
+    for (const pattern of namePatterns) {
+      const match = message.match(pattern);
+      if (match) {
+        updates.name = match[1].trim().split(' ').slice(0, 3).join(' ');
+        break;
+      }
     }
+    
+    for (const pattern of emailPatterns) {
+      const match = message.match(pattern);
+      if (match) {
+        updates.email = match[1];
+        break;
+      }
+    }
+    
+    for (const pattern of phonePatterns) {
+      const match = message.match(pattern);
+      if (match) {
+        updates.phone = match[1];
+        break;
+      }
+    }
+    
+    if (Object.keys(updates).length > 0) {
+      updates.level = USER_LEVEL.LIGHT;
+      await this.registerLight(updates);
+      return true;
+    }
+    
+    return false;
   }
 }
 
-// Initialize global auth instance
+// Global instance
 const queBotAuth = new QueBotAuth();
+
+// Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
   queBotAuth.init();
 });
