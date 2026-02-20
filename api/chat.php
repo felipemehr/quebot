@@ -276,76 +276,41 @@ function validateResponseURLs(string $response, array $allowedURLs): array {
 }
 
 /**
- * GEMINI FALLBACK — Called when Claude API fails (overloaded, 529, 500, etc.)
- * Converts Claude message format to Gemini format and calls the API.
- * 
- * @param string $systemPrompt The system prompt
- * @param array $messages Messages in Claude format [{role, content}]
- * @param int $maxTokens Max output tokens
- * @return array ['success' => bool, 'reply' => string, 'usage' => [...], 'model' => string]
+ * OPENAI FALLBACK — Called when Claude API fails (overloaded, 529, 500, etc.)
+ * Uses same message format as Claude (role: system/user/assistant).
  */
-function callGeminiFallback(string $systemPrompt, array $messages, int $maxTokens = 4096): array {
-    if (empty(GEMINI_API_KEY)) {
-        return ['success' => false, 'error' => 'GEMINI_API_KEY not configured'];
+function callOpenAIFallback(string $systemPrompt, array $messages, int $maxTokens = 4096): array {
+    if (empty(OPENAI_API_KEY)) {
+        return ['success' => false, 'error' => 'OPENAI_API_KEY not configured'];
     }
     
-    // Convert Claude messages to Gemini format
-    // Claude: {role: "user"|"assistant", content: "text"}
-    // Gemini: {role: "user"|"model", parts: [{text: "text"}]}
-    $geminiContents = [];
+    // OpenAI uses same role names as Claude
+    $oaiMessages = [
+        ['role' => 'system', 'content' => $systemPrompt]
+    ];
     foreach ($messages as $msg) {
-        $role = ($msg['role'] === 'assistant') ? 'model' : 'user';
-        $geminiContents[] = [
-            'role' => $role,
-            'parts' => [['text' => $msg['content']]]
+        $oaiMessages[] = [
+            'role' => $msg['role'],
+            'content' => $msg['content']
         ];
     }
     
-    // Ensure conversation starts with user (Gemini requirement)
-    if (!empty($geminiContents) && $geminiContents[0]['role'] !== 'user') {
-        array_unshift($geminiContents, [
-            'role' => 'user',
-            'parts' => [['text' => '.']]
-        ]);
-    }
+    $payload = json_encode([
+        'model' => OPENAI_MODEL,
+        'messages' => $oaiMessages,
+        'max_tokens' => $maxTokens,
+        'temperature' => 0.7
+    ], JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
     
-    // Ensure no consecutive same-role messages (Gemini requirement)
-    $cleaned = [];
-    $lastRole = null;
-    foreach ($geminiContents as $msg) {
-        if ($msg['role'] === $lastRole) {
-            // Merge with previous
-            $lastIdx = count($cleaned) - 1;
-            $prevText = $cleaned[$lastIdx]['parts'][0]['text'];
-            $cleaned[$lastIdx]['parts'][0]['text'] = $prevText . "\n\n" . $msg['parts'][0]['text'];
-        } else {
-            $cleaned[] = $msg;
-            $lastRole = $msg['role'];
-        }
-    }
-    
-    $geminiPayload = [
-        'system_instruction' => [
-            'parts' => [['text' => $systemPrompt]]
-        ],
-        'contents' => $cleaned,
-        'generationConfig' => [
-            'maxOutputTokens' => $maxTokens,
-            'temperature' => 0.7
-        ]
-    ];
-    
-    $url = 'https://generativelanguage.googleapis.com/v1beta/models/' 
-         . GEMINI_MODEL . ':generateContent?key=' . GEMINI_API_KEY;
-    
-    $jsonPayload = json_encode($geminiPayload, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
-    
-    $ch = curl_init($url);
+    $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_POSTFIELDS => $jsonPayload,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . OPENAI_API_KEY
+        ],
+        CURLOPT_POSTFIELDS => $payload,
         CURLOPT_TIMEOUT => 60
     ]);
     
@@ -354,34 +319,28 @@ function callGeminiFallback(string $systemPrompt, array $messages, int $maxToken
     curl_close($ch);
     
     if ($httpCode !== 200) {
-        error_log("Gemini fallback failed: HTTP {$httpCode} — " . substr($response, 0, 500));
-        return ['success' => false, 'error' => "Gemini HTTP {$httpCode}", 'raw' => substr($response, 0, 500)];
+        error_log("OpenAI fallback failed: HTTP {$httpCode} — " . substr($response, 0, 500));
+        return ['success' => false, 'error' => "OpenAI HTTP {$httpCode}"];
     }
     
     $data = json_decode($response, true);
+    $reply = $data['choices'][0]['message']['content'] ?? null;
     
-    // Extract text from Gemini response
-    $reply = $data['candidates'][0]['content']['parts'][0]['text'] ?? null;
     if (!$reply) {
-        error_log("Gemini fallback: no text in response — " . substr($response, 0, 500));
-        return ['success' => false, 'error' => 'No text in Gemini response'];
+        return ['success' => false, 'error' => 'No text in OpenAI response'];
     }
     
-    // Extract usage info
-    $usageMetadata = $data['usageMetadata'] ?? [];
-    $inputTokens = $usageMetadata['promptTokenCount'] ?? 0;
-    $outputTokens = $usageMetadata['candidatesTokenCount'] ?? 0;
-    
-    error_log("Gemini fallback SUCCESS: {$inputTokens} in / {$outputTokens} out tokens");
+    $usage = $data['usage'] ?? [];
+    error_log("OpenAI fallback SUCCESS: " . ($usage['prompt_tokens'] ?? 0) . " in / " . ($usage['completion_tokens'] ?? 0) . " out");
     
     return [
         'success' => true,
         'reply' => $reply,
         'usage' => [
-            'input_tokens' => $inputTokens,
-            'output_tokens' => $outputTokens
+            'input_tokens' => $usage['prompt_tokens'] ?? 0,
+            'output_tokens' => $usage['completion_tokens'] ?? 0
         ],
-        'model' => GEMINI_MODEL
+        'model' => OPENAI_MODEL
     ];
 }
 
@@ -578,7 +537,7 @@ $messages[] = [
     'content' => sanitizeUtf8($userMessage)
 ];
 
-// --- Call LLM API (Claude primary, Gemini fallback) ---
+// --- Call LLM API (Claude primary, OpenAI fallback) ---
 $llmStartTime = microtime(true);
 $modelUsed = MODEL;
 $usedFallback = false;
@@ -645,32 +604,32 @@ for ($attempt = 1; $attempt <= 2; $attempt++) {
     }
 }
 
-// If Claude failed, try Gemini fallback
+// If Claude failed, try OpenAI fallback
 if (!$claudeSuccess) {
-    error_log("Claude failed after retries. Attempting Gemini fallback...");
+    error_log("Claude failed after retries. Attempting OpenAI fallback...");
     
-    $geminiResult = callGeminiFallback(
+    $fallbackResult = callOpenAIFallback(
         sanitizeUtf8($systemPrompt),
         $messages,
         MAX_TOKENS
     );
     
-    if ($geminiResult['success']) {
-        $reply = $geminiResult['reply'];
-        $modelUsed = $geminiResult['model'];
+    if ($fallbackResult['success']) {
+        $reply = $fallbackResult['reply'];
+        $modelUsed = $fallbackResult['model'];
         $usedFallback = true;
         $data = [
-            'usage' => $geminiResult['usage']
+            'usage' => $fallbackResult['usage']
         ];
-        error_log("Gemini fallback succeeded: " . $geminiResult['model']);
+        error_log("OpenAI fallback succeeded: " . $fallbackResult['model']);
     } else {
         // Both failed
         $llmEndTime = microtime(true);
-        error_log("Both Claude and Gemini failed. Gemini: " . ($geminiResult['error'] ?? 'unknown'));
+        error_log("Both Claude and OpenAI failed. OpenAI: " . ($fallbackResult['error'] ?? 'unknown'));
         http_response_code(500);
         echo json_encode([
             'error' => 'API error', 
-            'details' => 'Claude y Gemini no disponibles temporalmente. Intenta en unos minutos.'
+            'details' => 'Claude y OpenAI no disponibles temporalmente. Intenta en unos minutos.'
         ]);
         exit;
     }
@@ -768,8 +727,8 @@ $outputTokens = $data['usage']['output_tokens'] ?? 0;
 
 // Cost estimate varies by model
 if ($usedFallback) {
-    // Gemini 2.0 Flash pricing
-    $costEstimate = ($inputTokens * 0.1 / 1000000) + ($outputTokens * 0.4 / 1000000);
+    // GPT-4o-mini pricing
+    $costEstimate = ($inputTokens * 0.15 / 1000000) + ($outputTokens * 0.6 / 1000000);
 } else {
     // Claude Sonnet pricing
     $costEstimate = ($inputTokens * 3 / 1000000) + ($outputTokens * 15 / 1000000);
