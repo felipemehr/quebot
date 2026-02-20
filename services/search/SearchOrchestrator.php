@@ -1,10 +1,22 @@
 <?php
 /**
- * Search Orchestrator v1.
- * 
- * Pipeline: QueryBuilder → Cache check → Provider search → Validate → Scrape → Rank → (LLM Rerank) → Cache store → Return
+ * Search Orchestrator v2.
+ *
+ * Pipeline:
+ *   IntentParser → QueryBuilder (site: queries) → Cache check →
+ *   Provider search (parallel) → Filter blocklist → De-dup →
+ *   Validate + Extract → Scrape top N → Re-rank (listing-aware) →
+ *   Insufficient check → Build LLM context → Cache store → Return
+ *
+ * New in v2:
+ * - Structured intent parsing for real_estate
+ * - site: operator queries (not raw user text)
+ * - Insufficient results handling with expansion suggestions
+ * - Intent + diagnostics in response
+ * - Fallback generic query if site: yields too few results
  */
 
+require_once __DIR__ . '/IntentParser.php';
 require_once __DIR__ . '/QueryBuilder.php';
 require_once __DIR__ . '/DomainPolicy.php';
 require_once __DIR__ . '/Validator.php';
@@ -19,6 +31,12 @@ class SearchOrchestrator {
     private SearchCache $cache;
     private ?string $claudeApiKey;
     private bool $llmRerankEnabled;
+
+    /** Minimum valid listings before declaring "insufficient offer" */
+    private const MIN_VALID_LISTINGS = 2;
+
+    /** Maximum queries to send in parallel (SerpAPI budget) */
+    private const MAX_PARALLEL_QUERIES = 8;
 
     public function __construct(?string $claudeApiKey = null, bool $llmRerankEnabled = false) {
         $this->cache = new SearchCache();
@@ -45,11 +63,9 @@ class SearchOrchestrator {
     }
 
     public function getPreferredProvider(string $vertical): object {
+        // Always prefer SerpAPI when available (supports site: operator)
         if (isset($this->providers['serpapi'])) {
-            $serpVerticals = ['news', 'retail', 'real_estate'];
-            if (in_array($vertical, $serpVerticals)) {
-                return $this->providers['serpapi'];
-            }
+            return $this->providers['serpapi'];
         }
         return $this->providers['duckduckgo'] ?? reset($this->providers);
     }
@@ -64,11 +80,14 @@ class SearchOrchestrator {
         $scrapePages = $options['scrape_pages'] ?? 5;
         $scrapeMaxLen = $options['scrape_max_length'] ?? 5000;
 
+        // Step 1: Parse intent + build queries
         $queryData = QueryBuilder::build($userMessage, $vertical);
         $vertical = $queryData['vertical'];
         $queries = $queryData['queries'];
         $cleanedQuery = $queryData['cleaned_query'];
+        $intent = $queryData['intent'] ?? null;
 
+        // Step 2: Cache check
         $cacheKey = $queries[0] ?? $cleanedQuery;
         $cached = $this->cache->get($vertical, $cacheKey);
         if ($cached !== null) {
@@ -77,16 +96,19 @@ class SearchOrchestrator {
             return $cached;
         }
 
+        // Step 3: Provider search (parallel)
         $provider = $this->getPreferredProvider($vertical);
         $providerName = $provider->getName();
 
-        // Use parallel search if provider supports it (SerpAPI), else sequential
+        // Limit queries to budget
+        $searchQueries = array_slice($queries, 0, self::MAX_PARALLEL_QUERIES);
+
         $allResults = [];
-        $seenUrls = [];
         if (method_exists($provider, 'searchParallel')) {
-            $allResults = $provider->searchParallel($queries, $maxResults);
+            $allResults = $provider->searchParallel($searchQueries, $maxResults);
         } else {
-            foreach ($queries as $q) {
+            $seenUrls = [];
+            foreach ($searchQueries as $q) {
                 $raw = $provider->search($q, $maxResults);
                 foreach ($raw as $r) {
                     $normUrl = rtrim($r['url'] ?? '', '/');
@@ -98,10 +120,12 @@ class SearchOrchestrator {
             }
         }
 
+        // Fallback to DDG if primary provider failed
         if (empty($allResults) && $providerName !== 'duckduckgo' && isset($this->providers['duckduckgo'])) {
             $provider = $this->providers['duckduckgo'];
             $providerName = 'duckduckgo (fallback)';
-            foreach ($queries as $q) {
+            $seenUrls = [];
+            foreach ($searchQueries as $q) {
                 $raw = $provider->search($q, $maxResults);
                 foreach ($raw as $r) {
                     $normUrl = rtrim($r['url'] ?? '', '/');
@@ -113,10 +137,15 @@ class SearchOrchestrator {
             }
         }
 
+        // Step 4: Validate + extract structured data
         $validated = array_map([Validator::class, 'extract'], $allResults);
 
+        // Step 5: Rank (includes blocklist filter + de-dup)
+        $ranked = HeuristicRanker::rank($validated, $cleanedQuery, $vertical, $intent ?? []);
+
+        // Step 6: Scrape top results for enrichment
         $scraped = 0;
-        foreach ($validated as &$r) {
+        foreach ($ranked as &$r) {
             if ($scraped >= $scrapePages) break;
 
             $shouldScrape = false;
@@ -136,6 +165,7 @@ class SearchOrchestrator {
                 $content = $provider->scrapeContent($r['url'] ?? '', $scrapeMaxLen);
                 if ($content) {
                     $r['scraped_content'] = $content;
+                    // Re-extract with scraped content
                     $r = Validator::extract($r);
                     $scraped++;
                 }
@@ -143,13 +173,40 @@ class SearchOrchestrator {
         }
         unset($r);
 
-        $ranked = HeuristicRanker::rank($validated, $cleanedQuery, $vertical);
+        // Step 7: Re-rank after scraping (scores may change with more data)
+        $ranked = HeuristicRanker::rank($ranked, $cleanedQuery, $vertical, $intent ?? []);
 
+        // Optional LLM rerank
         if ($this->llmRerankEnabled && $this->claudeApiKey && HeuristicRanker::needsLLMRerank($ranked)) {
             $ranked = LLMReranker::rerank($ranked, $cleanedQuery, $vertical, $this->claudeApiKey);
         }
 
         $ranked = array_slice($ranked, 0, $maxResults);
+
+        // Step 8: Count valid listings for real estate
+        $validListings = 0;
+        $validListingResults = [];
+        if ($vertical === 'real_estate') {
+            foreach ($ranked as $r) {
+                $urlType = $r['extracted']['url_type'] ?? 'unknown';
+                $tier = DomainPolicy::getTier($r['url'] ?? '', $vertical);
+                // A valid listing = specific URL on whitelisted domain OR listing page with data
+                if ($urlType === 'specific' && $tier !== 'none') {
+                    $validListings++;
+                    $validListingResults[] = $r;
+                } elseif ($urlType === 'listing' && $tier !== 'none' && ($r['extracted']['validated_field_count'] ?? 0) >= 2) {
+                    $validListings++;
+                    $validListingResults[] = $r;
+                }
+            }
+        }
+
+        // Step 9: Insufficient results handling
+        $insufficient = ($vertical === 'real_estate' && $validListings < self::MIN_VALID_LISTINGS);
+        $expansionSuggestions = [];
+        if ($insufficient && $intent) {
+            $expansionSuggestions = self::generateExpansionSuggestions($intent);
+        }
 
         // Collect all valid URLs from results
         $validURLs = [];
@@ -159,37 +216,145 @@ class SearchOrchestrator {
             }
         }
 
-        $contextForLLM = $this->buildLLMContext($ranked, $userMessage, $vertical);
+        // Step 10: Build LLM context
+        $contextForLLM = $this->buildLLMContext(
+            $ranked, $userMessage, $vertical, $intent,
+            $insufficient, $expansionSuggestions, $validListings
+        );
+
+        // Build diagnostics
+        $diagnostics = [
+            'total_raw_results' => count($allResults),
+            'after_filter_dedup' => count($ranked),
+            'valid_listings' => $validListings,
+            'insufficient' => $insufficient,
+            'queries_sent' => count($searchQueries),
+            'scraped_pages' => $scraped,
+        ];
 
         $response = [
             'results' => $this->cleanResultsForOutput($ranked),
             'vertical' => $vertical,
-            'queries_used' => $queries,
+            'intent' => $intent,
+            'queries_used' => $searchQueries,
             'provider_used' => $providerName,
             'cached' => false,
             'total_results' => count($ranked),
+            'valid_listings' => $validListings,
+            'insufficient' => $insufficient,
+            'expansion_suggestions' => $expansionSuggestions,
+            'diagnostics' => $diagnostics,
             'context_for_llm' => $contextForLLM,
             'valid_urls' => $validURLs,
             'timing_ms' => round((microtime(true) - $startTime) * 1000, 1),
         ];
 
-        $this->cache->set($vertical, $cacheKey, $response);
+        // Only cache if we have results
+        if (!empty($ranked)) {
+            $this->cache->set($vertical, $cacheKey, $response);
+        }
 
         return $response;
     }
 
     /**
-     * Build pre-formatted context string for Claude.
-     * Includes explicit URL whitelist to prevent fabrication.
+     * Generate expansion suggestions when results are insufficient.
      */
-    private function buildLLMContext(array $results, string $query, string $vertical): string {
-        if (empty($results)) {
-            return "\n\n🔍 BÚSQUEDA para \"{$query}\": No se encontraron resultados. "
-                 . "Informa al usuario que la búsqueda no arrojó resultados y sugiere "
-                 . "portales donde buscar directamente: portalinmobiliario.com, yapo.cl, toctoc.com\n";
+    private static function generateExpansionSuggestions(array $intent): array {
+        $suggestions = [];
+
+        $location = $intent['ubicacion'] ?? '';
+
+        // Suggest nearby locations
+        $nearbyMap = [
+            'Melipeuco' => ['Cunco', 'Villarrica', 'Pucón'],
+            'Curacautín' => ['Lonquimay', 'Victoria', 'Lautaro'],
+            'Pucón' => ['Villarrica', 'Cunco', 'Loncoche'],
+            'Villarrica' => ['Pucón', 'Loncoche', 'Freire'],
+            'Cunco' => ['Melipeuco', 'Villarrica', 'Temuco'],
+            'Lonquimay' => ['Curacautín', 'Victoria', 'Melipeuco'],
+            'Hornopirén' => ['Hualaihué', 'Calbuco', 'Puerto Montt'],
+            'Hualaihué' => ['Hornopirén', 'Calbuco', 'Puerto Montt'],
+            'Chaitén' => ['Hornopirén', 'Hualaihué', 'Puerto Montt'],
+            'Futrono' => ['Lago Ranco', 'Panguipulli', 'Río Bueno'],
+            'Panguipulli' => ['Futrono', 'Loncoche', 'Villarrica'],
+        ];
+
+        if ($location && isset($nearbyMap[$location])) {
+            $nearby = $nearbyMap[$location];
+            $suggestions[] = "Ampliar búsqueda a comunas cercanas: " . implode(', ', $nearby);
+        } elseif ($location) {
+            $suggestions[] = "Ampliar búsqueda a comunas vecinas de {$location}";
         }
 
-        $ctx = "\n\n🔍 RESULTADOS DE BÚSQUEDA para \"{$query}\" (vertical: {$vertical}):\n";
+        // Suggest relaxing surface constraint
+        if (!empty($intent['superficie'])) {
+            $s = $intent['superficie'];
+            if ($s['unit'] === 'ha' && $s['amount'] >= 3) {
+                $smaller = max(1, $s['amount'] - 2);
+                $suggestions[] = "Reducir superficie mínima a {$smaller} ha";
+            }
+        }
+
+        // Suggest relaxing must_have
+        if (count($intent['must_have'] ?? []) > 1) {
+            $suggestions[] = "Flexibilizar requisitos: mantener solo los más importantes y verificar los demás directamente con el vendedor";
+        }
+
+        // Suggest broadening property type
+        $tipo = $intent['tipo_propiedad'] ?? '';
+        if ($tipo === 'parcela') {
+            $suggestions[] = 'Buscar también como "terreno" o "sitio" (publicaciones pueden usar distintos términos)';
+        }
+
+        return $suggestions;
+    }
+
+    /**
+     * Build pre-formatted context string for Claude.
+     * v2: Includes intent summary, insufficient handling, expansion suggestions.
+     */
+    private function buildLLMContext(
+        array $results, string $query, string $vertical,
+        ?array $intent, bool $insufficient, array $expansionSuggestions,
+        int $validListings
+    ): string {
+        // === INTENT SUMMARY ===
+        $ctx = "\n\n";
+        if ($intent && $vertical === 'real_estate') {
+            $summary = IntentParser::summarize($intent);
+            $ctx .= "🎯 INTENCIÓN DETECTADA: {$summary}\n";
+            if ($intent['confidence'] < 0.3 && !empty($intent['fallback_questions'])) {
+                $ctx .= "⚠️ Confianza baja (" . ($intent['confidence'] * 100) . "%). ";
+                $ctx .= "Preguntas sugeridas: " . implode(' | ', $intent['fallback_questions']) . "\n";
+            }
+            $ctx .= "\n";
+        }
+
+        // === INSUFFICIENT RESULTS ===
+        if ($insufficient) {
+            $ctx .= "⚠️ OFERTA INSUFICIENTE EN PORTALES DIGITALES\n";
+            $ctx .= "Solo se encontraron {$validListings} listados válidos (mínimo requerido: " . self::MIN_VALID_LISTINGS . ").\n";
+            $ctx .= "NO inventes propiedades. Informa al usuario que la oferta digital es limitada.\n";
+            if (!empty($expansionSuggestions)) {
+                $ctx .= "📋 SUGERENCIAS DE EXPANSIÓN:\n";
+                foreach ($expansionSuggestions as $i => $suggestion) {
+                    $ctx .= "  " . ($i + 1) . ". {$suggestion}\n";
+                }
+            }
+            $ctx .= "\n";
+        }
+
+        if (empty($results)) {
+            $ctx .= "🔍 BÚSQUEDA para \"{$query}\": No se encontraron resultados.\n";
+            $ctx .= "Informa al usuario que la búsqueda no arrojó resultados.\n";
+            if ($vertical === 'real_estate') {
+                $ctx .= "Sugiere buscar directamente en: portalinmobiliario.com, yapo.cl, toctoc.com\n";
+            }
+            return $ctx;
+        }
+
+        $ctx .= "🔍 RESULTADOS DE BÚSQUEDA para \"{$query}\" (vertical: {$vertical}):\n";
         $ctx .= "⛔ REGLA ABSOLUTA: Solo puedes usar URLs que aparezcan LITERALMENTE abajo. "
               . "NO construyas URLs. NO inventes slugs. NO combines dominios con paths inventados.\n\n";
 
@@ -201,8 +366,9 @@ class SearchOrchestrator {
             $domain = parse_url($r['url'] ?? '', PHP_URL_HOST) ?: 'unknown';
             $tier = DomainPolicy::getTier($r['url'] ?? '', $vertical);
             $tierLabel = $tier !== 'none' ? " [Tier {$tier}]" : '';
+            $score = $r['score'] ?? 0;
 
-            $ctx .= "{$num}. [{$urlType}]{$tierLabel} {$r['title']}\n";
+            $ctx .= "{$num}. [{$urlType}]{$tierLabel} (score: {$score}) {$r['title']}\n";
             $ctx .= "   URL: {$r['url']}\n";
             $ctx .= "   Dominio: {$domain}\n";
 
