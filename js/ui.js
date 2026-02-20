@@ -378,7 +378,7 @@ const UI = {
         div.dataset.messageId = message.id;
 
         const time = message.timestamp ? this.formatTime(message.timestamp) : '';
-        const authorName = message.role === 'user' ? 'T\u00fa' : 'QueBot';
+        const authorName = message.role === 'user' ? 'Tú' : 'QueBot';
         const avatarContent = message.role === 'user' 
             ? 'F' 
             : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -452,8 +452,8 @@ const UI = {
                 
                 this.pendingRenders[renderId] = { type, title, data };
                 
-                const icon = type === 'map' ? '\ud83d\uddfa\ufe0f' : type === 'table' ? '\ud83d\udcca' : '\ud83d\udcc8';
-                const label = type === 'map' ? 'Ver Mapa' : type === 'table' ? 'Ver Tabla' : 'Ver Gr\u00e1fico';
+                const icon = type === 'map' ? '🗺️' : type === 'table' ? '📊' : '📈';
+                const label = type === 'map' ? 'Ver Mapa' : type === 'table' ? 'Ver Tabla' : 'Ver Gráfico';
                 
                 return `<button class="render-btn render-btn-${type}" data-render-id="${renderId}">${icon} ${label}: ${this.escapeHtml(title)}</button>`;
             } catch (e) {
@@ -466,7 +466,7 @@ const UI = {
     },
 
     /**
-     * Actualizar contenido del \u00faltimo mensaje del asistente
+     * Actualizar contenido del último mensaje del asistente
      */
     updateLastAssistantMessage(content) {
         const messages = this.elements.messagesList.querySelectorAll('.message.assistant');
@@ -557,14 +557,14 @@ const UI = {
     
     _extractLocation(q) {
         const cities = {
-            'santiago': 'Santiago', 'valparaiso': 'Valpara\u00edso', 'vina del mar': 'Vi\u00f1a del Mar',
-            'concepcion': 'Concepci\u00f3n', 'la serena': 'La Serena', 'antofagasta': 'Antofagasta',
+            'santiago': 'Santiago', 'valparaiso': 'Valparaíso', 'vina del mar': 'Viña del Mar',
+            'concepcion': 'Concepción', 'la serena': 'La Serena', 'antofagasta': 'Antofagasta',
             'temuco': 'Temuco', 'rancagua': 'Rancagua', 'talca': 'Talca', 'arica': 'Arica',
             'iquique': 'Iquique', 'puerto montt': 'Puerto Montt', 'osorno': 'Osorno',
-            'valdivia': 'Valdivia', 'chillan': 'Chill\u00e1n', 'copiapo': 'Copiap\u00f3',
-            'punta arenas': 'Punta Arenas', 'melipeuco': 'Melipeuco', 'pucon': 'Puc\u00f3n',
-            'villarrica': 'Villarrica', 'olmue': 'Olmu\u00e9', 'limache': 'Limache',
-            'curico': 'Curic\u00f3', 'linares': 'Linares', 'los angeles': 'Los \u00c1ngeles',
+            'valdivia': 'Valdivia', 'chillan': 'Chillán', 'copiapo': 'Copiapó',
+            'punta arenas': 'Punta Arenas', 'melipeuco': 'Melipeuco', 'pucon': 'Pucón',
+            'villarrica': 'Villarrica', 'olmue': 'Olmué', 'limache': 'Limache',
+            'curico': 'Curicó', 'linares': 'Linares', 'los angeles': 'Los Ángeles',
             'coyhaique': 'Coyhaique', 'calama': 'Calama', 'ovalle': 'Ovalle'
         };
         for (const [key, name] of Object.entries(cities)) {
@@ -587,14 +587,15 @@ const UI = {
         const loc = location ? ` en ${location}` : '';
         const locShort = location || 'la zona';
         return [
-            { icon: '\ud83c\udfe0', text: `Detectando b\u00fasqueda inmobiliaria${loc}...` },
-            { icon: '\ud83d\udd0e', text: `Generando b\u00fasquedas optimizadas para ${locShort}...` },
-            { icon: '\ud83c\udf10', text: 'Consultando portalinmobiliario.com, toctoc.com, yapo.cl...' },
-            { icon: '\ud83d\udcc4', text: 'Extrayendo datos de publicaciones encontradas...' },
-            { icon: '\ud83d\udcb0', text: 'Validando precios, superficies y UF...' },
-            { icon: '\ud83d\udcca', text: 'Ranking resultados por relevancia y confiabilidad...' },
-            { icon: '\u2705', text: 'Verificando links y datos reales...' },
-            { icon: '\u270d\ufe0f', text: 'Armando tabla comparativa...' }
+            { icon: '🏠', text: `Detectando búsqueda inmobiliaria${loc}...` },
+            { icon: '🔎', text: `Generando búsquedas optimizadas para ${locShort}...` },
+            { icon: '🌐', text: 'Consultando portalinmobiliario.com, toctoc.com, yapo.cl...' },
+            { icon: '📄', text: 'Extrayendo datos de publicaciones encontradas...' },
+            { icon: '💰', text: 'Validando precios, superficies y UF...' },
+            { icon: '📊', text: 'Ranking resultados por relevancia y confiabilidad...' },
+            { icon: '✅', text: 'Verificando links y datos reales...' },
+            { icon: '✍️', text: 'Armando tabla comparativa...' },
+            { icon: '🔍', text: 'Control de calidad: verificando precisión...' }
         ];
     },
     
@@ -604,74 +605,74 @@ const UI = {
         const artMatch = q.match(/articulo\s*(\d+)/);
         let lawName = topic || 'normativa';
         if (lawMatch) lawName = `Ley ${lawMatch[1]}`;
-        if (codeMatch) lawName = `C\u00f3digo ${codeMatch[1].charAt(0).toUpperCase() + codeMatch[1].slice(1)}`;
+        if (codeMatch) lawName = `Código ${codeMatch[1].charAt(0).toUpperCase() + codeMatch[1].slice(1)}`;
         return [
-            { icon: '\u2696\ufe0f', text: `Detectando consulta legal: ${lawName}...` },
-            { icon: '\ud83d\udcda', text: 'Buscando en base de datos legal (5.344 art\u00edculos)...' },
-            { icon: '\ud83d\udd0e', text: artMatch ? `Localizando art\u00edculo ${artMatch[1]}...` : `Buscando art\u00edculos de ${lawName}...` },
-            { icon: '\ud83d\udcd6', text: 'Consultando LeyChile y BCN...' },
-            { icon: '\ud83e\udde0', text: 'Analizando texto legal aplicable...' },
-            { icon: '\u270d\ufe0f', text: 'Preparando respuesta con referencias...' }
+            { icon: '⚖️', text: `Detectando consulta legal: ${lawName}...` },
+            { icon: '📚', text: 'Buscando en base de datos legal (5.344 artículos)...' },
+            { icon: '🔎', text: artMatch ? `Localizando artículo ${artMatch[1]}...` : `Buscando artículos de ${lawName}...` },
+            { icon: '📖', text: 'Consultando LeyChile y BCN...' },
+            { icon: '🧠', text: 'Analizando texto legal aplicable...' },
+            { icon: '✍️', text: 'Preparando respuesta con referencias...' }
         ];
     },
     
     _newsSteps(q, topic) {
         const t = topic || 'actualidad';
         return [
-            { icon: '\ud83d\udcf0', text: `Buscando noticias: ${t}...` },
-            { icon: '\ud83c\udf10', text: 'Consultando La Tercera, Emol, BioBio Chile...' },
-            { icon: '\ud83d\udcc4', text: 'Extrayendo art\u00edculos recientes...' },
-            { icon: '\u2705', text: 'Verificando fuentes y fechas...' },
-            { icon: '\u270d\ufe0f', text: 'Preparando resumen noticioso...' }
+            { icon: '📰', text: `Buscando noticias: ${t}...` },
+            { icon: '🌐', text: 'Consultando La Tercera, Emol, BioBio Chile...' },
+            { icon: '📄', text: 'Extrayendo artículos recientes...' },
+            { icon: '✅', text: 'Verificando fuentes y fechas...' },
+            { icon: '✍️', text: 'Preparando resumen noticioso...' }
         ];
     },
     
     _retailSteps(q, topic) {
         const t = topic || 'productos';
         return [
-            { icon: '\ud83d\uded2', text: `Buscando ${t}...` },
-            { icon: '\ud83c\udf10', text: 'Consultando Solotodo, Falabella, Ripley, PCFactory...' },
-            { icon: '\ud83d\udcb0', text: 'Extrayendo precios y ofertas...' },
-            { icon: '\ud83d\udcca', text: 'Comparando opciones...' },
-            { icon: '\u270d\ufe0f', text: 'Preparando comparativa...' }
+            { icon: '🛒', text: `Buscando ${t}...` },
+            { icon: '🌐', text: 'Consultando Solotodo, Falabella, Ripley, PCFactory...' },
+            { icon: '💰', text: 'Extrayendo precios y ofertas...' },
+            { icon: '📊', text: 'Comparando opciones...' },
+            { icon: '✍️', text: 'Preparando comparativa...' }
         ];
     },
     
     _mapSteps(q, location) {
         const loc = location || 'la zona';
         return [
-            { icon: '\ud83d\uddfa\ufe0f', text: `Preparando mapa de ${loc}...` },
-            { icon: '\ud83d\udccd', text: 'Obteniendo coordenadas verificadas...' },
-            { icon: '\ud83c\udfa8', text: 'Generando visualizaci\u00f3n interactiva...' },
-            { icon: '\u270d\ufe0f', text: 'Listo para mostrar...' }
+            { icon: '🗺️', text: `Preparando mapa de ${loc}...` },
+            { icon: '📍', text: 'Obteniendo coordenadas verificadas...' },
+            { icon: '🎨', text: 'Generando visualización interactiva...' },
+            { icon: '✍️', text: 'Listo para mostrar...' }
         ];
     },
     
     _searchSteps(q, topic) {
         const t = topic || 'tu consulta';
         return [
-            { icon: '\ud83d\udd0d', text: `Analizando: ${t}...` },
-            { icon: '\ud83c\udf10', text: 'Buscando en fuentes confiables...' },
-            { icon: '\ud83d\udcc4', text: 'Revisando p\u00e1ginas encontradas...' },
-            { icon: '\ud83d\udcca', text: 'Procesando y verificando datos...' },
-            { icon: '\u270d\ufe0f', text: 'Preparando respuesta...' }
+            { icon: '🔍', text: `Analizando: ${t}...` },
+            { icon: '🌐', text: 'Buscando en fuentes confiables...' },
+            { icon: '📄', text: 'Revisando páginas encontradas...' },
+            { icon: '📊', text: 'Procesando y verificando datos...' },
+            { icon: '✍️', text: 'Preparando respuesta...' }
         ];
     },
     
     _conversationalSteps(q) {
         return [
-            { icon: '\ud83e\udde0', text: 'Procesando tu mensaje...' },
-            { icon: '\ud83d\udcad', text: 'Pensando la mejor respuesta...' },
-            { icon: '\u270d\ufe0f', text: 'Escribiendo...' }
+            { icon: '🧠', text: 'Procesando tu mensaje...' },
+            { icon: '💭', text: 'Pensando la mejor respuesta...' },
+            { icon: '✍️', text: 'Escribiendo...' }
         ];
     },
     
     _defaultThinkingSteps() {
         return [
-            { icon: '\ud83d\udd0d', text: 'Analizando consulta...' },
-            { icon: '\ud83c\udf10', text: 'Buscando informaci\u00f3n...' },
-            { icon: '\ud83d\udcca', text: 'Procesando resultados...' },
-            { icon: '\u270d\ufe0f', text: 'Preparando respuesta...' }
+            { icon: '🔍', text: 'Analizando consulta...' },
+            { icon: '🌐', text: 'Buscando información...' },
+            { icon: '📊', text: 'Procesando resultados...' },
+            { icon: '✍️', text: 'Preparando respuesta...' }
         ];
     },
 
@@ -772,7 +773,7 @@ const UI = {
     },
 
     /**
-     * Actualizar t\u00edtulo del chat
+     * Actualizar título del chat
      */
     setChatTitle(title) {
         this.elements.chatTitle.textContent = title;
@@ -806,7 +807,7 @@ const UI = {
     },
 
     /**
-     * Mostrar toast de notificaci\u00f3n
+     * Mostrar toast de notificación
      */
     showToast(message, type = 'info', duration = 5000) {
         const toast = document.createElement('div');

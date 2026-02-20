@@ -4,6 +4,7 @@ require_once __DIR__ . '/search.php';
 require_once __DIR__ . '/../services/legal/LegalSearch.php';
 require_once __DIR__ . '/../services/ProfileBuilder.php';
 require_once __DIR__ . '/../services/FirestoreAudit.php';
+require_once __DIR__ . '/../services/ResponseVerifier.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -512,6 +513,40 @@ if ($httpCode !== 200) {
 $data = json_decode($response, true);
 $reply = $data['content'][0]['text'] ?? 'Sin respuesta';
 
+// === RESPONSE VERIFIER — Pre-delivery quality gate ===
+$verifierResult = null;
+$verifierTimingMs = 0;
+if ($shouldSearch && !empty($searchValidURLs)) {
+    try {
+        $verifier = new ResponseVerifier(CLAUDE_API_KEY);
+        
+        // Build search results array for verifier
+        $searchResultsForVerifier = $searchResult['results'] ?? [];
+        
+        $verifierResult = $verifier->verify(
+            $message,
+            $reply,
+            $searchResultsForVerifier,
+            $searchIntent,
+            $searchVertical ?? 'general'
+        );
+        
+        $verifierTimingMs = $verifierResult['timing_ms'] ?? 0;
+        
+        // Apply verifier decision
+        if (in_array($verifierResult['verdict'], ['PATCH', 'REGEN', 'FLAG'])) {
+            $reply = $verifierResult['response'];
+            error_log("ResponseVerifier: {$verifierResult['verdict']} (confidence: {$verifierResult['confidence']}) — " 
+                . count($verifierResult['fixes'] ?? []) . " fixes applied"
+                . ($verifierResult['regenerated'] ? " [REGENERATED]" : ""));
+        } else {
+            error_log("ResponseVerifier: {$verifierResult['verdict']} (confidence: {$verifierResult['confidence']})");
+        }
+    } catch (\Throwable $e) {
+        error_log("ResponseVerifier error (non-blocking): " . $e->getMessage());
+    }
+}
+
 // === POST-PROCESS: VALIDATE URLs IN RESPONSE ===
 $fabricatedCount = 0;
 if ($shouldSearch && !empty($searchValidURLs)) {
@@ -535,6 +570,22 @@ try {
         $profileTimingMs = round((microtime(true) - $profileStart) * 1000);
         if ($profileUpdate) {
             error_log("ProfileBuilder: Profile updated (" . count(array_filter($profileUpdate, fn($v) => $v !== null && $v !== [])) . " fields) in {$profileTimingMs}ms");
+
+// === FIRESTORE AUDIT: Log verification result ===
+if ($verifierResult && $verifierResult['verdict'] !== 'SKIP') {
+    try {
+        FirestoreAudit::logEvent('RESPONSE_VERIFIED', [
+            'verdict' => $verifierResult['verdict'],
+            'confidence' => $verifierResult['confidence'],
+            'dimensions' => $verifierResult['dimensions'] ?? [],
+            'fixes_count' => count($verifierResult['fixes'] ?? []),
+            'regenerated' => $verifierResult['regenerated'] ?? false,
+            'timing_ms' => $verifierTimingMs,
+        ], $caseId);
+    } catch (\Throwable $e) {
+        error_log("Verifier audit log error: " . $e->getMessage());
+    }
+}
         }
     }
 } catch (Exception $e) {
@@ -570,6 +621,9 @@ echo json_encode([
         'timing_llm' => $timingLlm,
         'fabricated_urls_caught' => $fabricatedCount,
         'timing_profile' => $profileTimingMs,
+        'timing_verifier' => $verifierTimingMs,
+        'verifier_verdict' => $verifierResult ? $verifierResult['verdict'] : null,
+        'verifier_confidence' => $verifierResult ? $verifierResult['confidence'] : null,
         'search_valid_listings' => $searchValidListings,
         'search_insufficient' => $searchInsufficient,
     ],
