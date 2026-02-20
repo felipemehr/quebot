@@ -244,6 +244,16 @@ class IntentParser {
             $intent['superficie'] = ['amount' => $val, 'unit' => 'm2', 'm2' => $val];
         }
 
+        // --- Infer property type from surface ---
+        // If surface in hectáreas and no explicit type → likely parcela/terreno
+        if (!$intent['tipo_propiedad'] && $intent['superficie'] && $intent['superficie']['unit'] === 'ha') {
+            $intent['tipo_propiedad'] = 'parcela';
+        }
+        // If surface > 1000m2 and no type → likely terreno/parcela
+        if (!$intent['tipo_propiedad'] && $intent['superficie'] && $intent['superficie']['m2'] > 1000) {
+            $intent['tipo_propiedad'] = 'terreno';
+        }
+
         // --- Dormitorios / Baños ---
         if (preg_match('/(\d+)\s*(?:dormitorio|dorm|pieza|habitaci[oó]n)/i', $q, $m)) {
             $intent['dormitorios'] = (int) $m[1];
@@ -268,6 +278,12 @@ class IntentParser {
             }
         }
         $intent['must_have'] = $foundFeatures;
+
+        // --- Infer from budget context ---
+        // "puedo comprar varias" implies buying intent with budget
+        if (str_contains($q, 'comprar') || str_contains($q, 'puedo')) {
+            $intent['operacion'] = 'venta';
+        }
 
         // --- Fallback questions ---
         if (!$intent['ubicacion']) {
