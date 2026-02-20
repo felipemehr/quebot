@@ -23,6 +23,7 @@ class QueBotAuth {
     this.db = null;
     this.currentUser = null;
     this.userProfile = null;
+    this.searchProfile = null;
     this.messageCount = 0;
     this.hasAskedForRegistration = false;
     this.initialized = false;
@@ -129,6 +130,7 @@ class QueBotAuth {
       const doc = await this.db.collection('users').doc(this.currentUser.uid).get();
       if (doc.exists) {
         this.userProfile = doc.data();
+        this.searchProfile = doc.data()?.search_profile || null;
       } else {
         this.userProfile = {
           level: this.currentUser.isAnonymous ? USER_LEVEL.ANONYMOUS : USER_LEVEL.FULL,
@@ -200,6 +202,7 @@ class QueBotAuth {
       await this.auth.signOut();
       this.currentUser = null;
       this.userProfile = null;
+    this.searchProfile = null;
       this.updateUI();
     } catch (error) {
       console.error('Sign out error:', error);
@@ -221,6 +224,41 @@ class QueBotAuth {
   }
 
   markAskedForRegistration() {
+
+  // === Search Profile Methods ===
+  
+  getSearchProfile() {
+    return this.searchProfile || null;
+  }
+
+  async saveSearchProfile(profileData) {
+    if (!this.currentUser || !this.db || !profileData) return;
+    try {
+      const existing = this.searchProfile || {};
+      const merged = { ...existing };
+      
+      for (const [key, value] of Object.entries(profileData)) {
+        if (Array.isArray(value) && Array.isArray(existing[key])) {
+          merged[key] = [...new Set([...existing[key], ...value])];
+        } else if (value !== null && value !== undefined) {
+          merged[key] = value;
+        }
+      }
+      
+      merged.updated_at = new Date().toISOString();
+      
+      await this.db.collection('users').doc(this.currentUser.uid).set(
+        { search_profile: merged }, 
+        { merge: true }
+      );
+      
+      this.searchProfile = merged;
+      console.log('Search profile saved:', Object.keys(merged).length, 'fields');
+    } catch (error) {
+      console.error('Save search profile error:', error);
+    }
+  }
+
     this.hasAskedForRegistration = true;
   }
 
