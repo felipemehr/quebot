@@ -3,6 +3,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/search.php';
 require_once __DIR__ . '/../services/legal/LegalSearch.php';
 require_once __DIR__ . '/../services/ProfileBuilder.php';
+require_once __DIR__ . '/../services/FirestoreAudit.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -88,6 +89,7 @@ $conversationHistory = $input['history'] ?? [];
 $userId = $input['userId'] ?? 'anonymous';
 $userName = $input['userName'] ?? '';
 $userProfile = $input['user_profile'] ?? null;
+$caseId = $input['caseId'] ?? null;
 
 if (empty($message)) {
     http_response_code(400);
@@ -341,6 +343,12 @@ $searchContext = '';
 $searchVertical = null;
 $searchProviderUsed = null;
 $searchValidURLs = []; // URLs allowed in response
+$searchIntent = null;
+$searchDiagnostics = null;
+$searchValidListings = 0;
+$searchInsufficient = false;
+$searchExpansionSuggestions = [];
+$searchQueriesUsed = [];
 $ragStartTime = microtime(true);
 
 if ($shouldSearch) {
@@ -362,6 +370,56 @@ if ($shouldSearch) {
         $searchVertical = $searchResult['vertical'] ?? null;
         $searchProviderUsed = $searchResult['provider_used'] ?? null;
         $searchValidURLs = $searchResult['valid_urls'] ?? [];
+        $searchIntent = $searchResult['intent'] ?? null;
+        $searchDiagnostics = $searchResult['diagnostics'] ?? null;
+        $searchValidListings = $searchResult['valid_listings'] ?? 0;
+        $searchInsufficient = $searchResult['insufficient'] ?? false;
+        $searchExpansionSuggestions = $searchResult['expansion_suggestions'] ?? [];
+        $searchQueriesUsed = $searchResult['queries_used'] ?? [];
+        
+        // === FIRESTORE AUDIT: Log search run ===
+        try {
+            $searchRunId = FirestoreAudit::logSearchRun([
+                'case_id' => $caseId ?? '',
+                'user_id' => $userId,
+                'user_query' => $searchQuery,
+                'vertical' => $searchVertical,
+                'intent' => $searchIntent,
+                'queries_built' => $searchQueriesUsed,
+                'provider' => $searchProviderUsed,
+                'raw_results_count' => $searchDiagnostics['total_raw_results'] ?? 0,
+                'valid_listings' => $searchValidListings,
+                'insufficient' => $searchInsufficient,
+                'expansion_suggestions' => $searchExpansionSuggestions,
+                'top_results' => $searchResult['results'] ?? [],
+                'timing_ms' => $searchResult['timing_ms'] ?? 0,
+                'diagnostics' => $searchDiagnostics ?? [],
+            ]);
+            
+            // Log search events
+            FirestoreAudit::logEvent('SEARCH_COMPLETED', [
+                'vertical' => $searchVertical ?? 'unknown',
+                'provider' => $searchProviderUsed ?? 'unknown',
+                'results_count' => count($searchResult['results'] ?? []),
+                'valid_listings' => $searchValidListings,
+                'insufficient' => $searchInsufficient,
+                'timing_ms' => $searchResult['timing_ms'] ?? 0,
+            ], $caseId, $searchRunId);
+            
+            // Update case with search metadata
+            if ($caseId && $searchIntent) {
+                FirestoreAudit::updateCaseSearchMeta($caseId, [
+                    'vertical' => $searchVertical,
+                    'location' => $searchIntent['ubicacion'] ?? '',
+                    'property_type' => $searchIntent['tipo_propiedad'] ?? '',
+                    'budget' => !empty($searchIntent['presupuesto']) 
+                        ? $searchIntent['presupuesto']['raw'] ?? '' 
+                        : '',
+                ]);
+            }
+        } catch (\Throwable $e) {
+            error_log("FirestoreAudit error: " . $e->getMessage());
+        }
     } catch (\Throwable $e) {
         error_log("SearchOrchestrator error: " . $e->getMessage());
         $searchContext = "\n\n🔍 BÚSQUEDA para \"{$searchQuery}\": Error en la búsqueda. Informa al usuario que hubo un problema técnico buscando y sugiere buscar directamente en portalinmobiliario.com, yapo.cl, toctoc.com\n";
@@ -511,8 +569,11 @@ echo json_encode([
         'timing_rag' => $timingRag,
         'timing_llm' => $timingLlm,
         'fabricated_urls_caught' => $fabricatedCount,
-        'timing_profile' => $profileTimingMs
+        'timing_profile' => $profileTimingMs,
+        'search_valid_listings' => $searchValidListings,
+        'search_insufficient' => $searchInsufficient,
     ],
+    'search_intent' => $searchIntent,
     'profile_update' => $profileUpdate
 ], JSON_UNESCAPED_UNICODE);
 ?>
