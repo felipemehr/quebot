@@ -224,6 +224,8 @@ class QueBotAuth {
   }
 
   markAskedForRegistration() {
+    this.askedForRegistration = true;
+  }
 
   // === Search Profile Methods ===
   
@@ -257,9 +259,6 @@ class QueBotAuth {
     } catch (error) {
       console.error('Save search profile error:', error);
     }
-  }
-
-    this.hasAskedForRegistration = true;
   }
 
   getUserLevel() {
