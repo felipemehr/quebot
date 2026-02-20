@@ -2,14 +2,15 @@
 require_once __DIR__ . '/DomainPolicy.php';
 
 /**
- * HeuristicRanker v2 — Listing-aware scoring for real estate.
+ * HeuristicRanker v3 — SearchSpec-aware scoring for real estate.
  *
  * Score formula:
- *   0.25 * query_match
- * + 0.25 * domain_trust
- * + 0.20 * listing_signals (is it a specific property page?)
+ *   0.20 * query_match
+ * + 0.20 * domain_trust
+ * + 0.15 * listing_signals (is it a specific property page?)
  * + 0.15 * data_richness (extracted price/area/beds)
- * + 0.15 * freshness
+ * + 0.10 * freshness
+ * + 0.20 * intent_match (price in range, zone match, type match)
  * - penalties (search pages, category pages, informational)
  *
  * New in v2:
@@ -135,13 +136,15 @@ class HeuristicRanker {
         $listingScore = self::listingScore($result, $vertical);
         $dataScore = self::dataRichnessScore($result, $intent);
         $freshnessScore = self::freshnessScore($result);
+        $intentMatch = self::intentMatchScore($result, $intent);
         $penalty = self::penaltyScore($result, $vertical);
 
-        $total = 0.25 * $matchScore
-               + 0.25 * $domainScore
-               + 0.20 * $listingScore
+        $total = 0.20 * $matchScore
+               + 0.20 * $domainScore
+               + 0.15 * $listingScore
                + 0.15 * $dataScore
-               + 0.15 * $freshnessScore
+               + 0.10 * $freshnessScore
+               + 0.20 * $intentMatch
                - $penalty;
 
         $total = max(0.0, min(1.0, $total));
@@ -154,6 +157,7 @@ class HeuristicRanker {
                 'listing_type' => round($listingScore, 3),
                 'data_richness' => round($dataScore, 3),
                 'freshness' => round($freshnessScore, 3),
+                'intent_match' => round($intentMatch, 3),
                 'penalty' => round($penalty, 3),
             ],
         ];
@@ -279,4 +283,88 @@ class HeuristicRanker {
                       'un', 'una', 'con', 'por', 'para', 'que', 'se', 'es'];
         return array_values(array_diff($words, $stopwords));
     }
+
+    /**
+     * Score based on how well the result matches the SearchSpec intent.
+     * v3 addition: price proximity, zone mention, type match.
+     */
+    private static function intentMatchScore(array $result, array $intent): float {
+        if (empty($intent)) return 0.5;
+
+        $score = 0.5;  // Base score
+        $ext = $result['extracted'] ?? [];
+        $text = mb_strtolower(
+            ($result['title'] ?? '') . ' ' .
+            ($result['snippet'] ?? '') . ' ' .
+            ($result['scraped_content'] ?? '')
+        );
+
+        // Price proximity (if intent has price and result has price)
+        if (!empty($intent['precio']) && !empty($ext['price_uf'])) {
+            $maxPrice = $intent['precio']['max'] ?? 0;
+            $minPrice = $intent['precio']['min'] ?? 0;
+            $candidatePrice = (float) $ext['price_uf'];
+
+            if ($maxPrice > 0) {
+                $tol = ($intent['tolerancia_precio_pct'] ?? 12) / 100;
+                $rangeMin = $minPrice > 0 ? $minPrice * (1 - $tol) : 0;
+                $rangeMax = $maxPrice * (1 + $tol);
+                $rangeMid = ($rangeMin + $rangeMax) / 2;
+
+                if ($candidatePrice >= $rangeMin && $candidatePrice <= $rangeMax) {
+                    // In range — score by proximity to midpoint
+                    $deviation = abs($candidatePrice - $rangeMid) / max($rangeMid, 1);
+                    $score += 0.20 * (1.0 - min($deviation, 1.0));
+                } else {
+                    // Out of range — penalize
+                    $score -= 0.15;
+                }
+            }
+        }
+
+        // Zone mention (if intent has zona_texto)
+        if (!empty($intent['zona_texto'])) {
+            $zona = mb_strtolower($intent['zona_texto']);
+            // Check for sector-related keywords
+            $zoneKeywords = [];
+            if (str_contains($zona, 'alto') || str_contains($zona, 'exclusiv')) {
+                $zoneKeywords = ['exclusiv', 'alto estándar', 'residencial', 'premium', 'condominio'];
+            }
+            foreach ($zoneKeywords as $kw) {
+                if (str_contains($text, $kw)) {
+                    $score += 0.10;
+                    break;
+                }
+            }
+        }
+
+        // Location match
+        if (!empty($intent['ubicacion'])) {
+            $loc = mb_strtolower($intent['ubicacion']);
+            if (str_contains($text, $loc)) {
+                $score += 0.05;
+            }
+        }
+
+        // Property type match
+        if (!empty($intent['tipo_propiedad']) && $intent['tipo_propiedad'] !== 'unknown') {
+            $tipo = mb_strtolower($intent['tipo_propiedad']);
+            $synonyms = [
+                'casa' => ['casa', 'vivienda', 'residencia'],
+                'departamento' => ['departamento', 'depto', 'dpto', 'flat'],
+                'parcela' => ['parcela', 'terreno', 'sitio', 'lote'],
+                'campo' => ['campo', 'fundo', 'chacra', 'agrícola'],
+            ];
+            $typeWords = $synonyms[$tipo] ?? [$tipo];
+            foreach ($typeWords as $tw) {
+                if (str_contains($text, $tw)) {
+                    $score += 0.05;
+                    break;
+                }
+            }
+        }
+
+        return max(0.0, min(1.0, $score));
+    }
+
 }
