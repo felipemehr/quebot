@@ -1,12 +1,17 @@
 <?php
 require_once __DIR__ . '/DomainPolicy.php';
+require_once __DIR__ . '/IntentParser.php';
 
 /**
- * Builds optimized search queries per vertical.
- * Cleans user input, expands abbreviations, generates multi-query sets.
+ * QueryBuilder v2 — Builds controlled site: queries for real estate,
+ * never sends raw user text as query.
  *
- * NOTE: Does NOT use site: operator — DuckDuckGo HTML doesn't support it.
- * Instead uses domain names as query hints.
+ * For real_estate:
+ *   Uses IntentParser to extract structured intent, then builds
+ *   targeted site: queries per portal with type+location+keywords.
+ *
+ * For other verticals:
+ *   Cleans query and adds domain hints (unchanged from v1).
  */
 class QueryBuilder {
 
@@ -48,17 +53,22 @@ class QueryBuilder {
     /**
      * Build search queries for a given user message and vertical.
      *
-     * @return array{queries: string[], cleaned_query: string, vertical: string}
+     * @return array{queries: string[], cleaned_query: string, vertical: string, intent: ?array}
      */
     public static function build(string $userMessage, string $vertical = 'auto'): array {
         if ($vertical === 'auto') {
             $vertical = DomainPolicy::detectVertical($userMessage);
         }
 
+        // For real estate, use structured intent parser
+        if ($vertical === 'real_estate') {
+            return self::buildFromIntent($userMessage);
+        }
+
+        // Other verticals: clean + domain hints (v1 behavior)
         $cleaned = self::cleanQuery($userMessage, $vertical);
 
         $queries = match ($vertical) {
-            'real_estate' => self::buildRealEstateQueries($cleaned),
             'legal' => self::buildLegalQueries($cleaned),
             'news' => self::buildNewsQueries($cleaned),
             'retail' => self::buildRetailQueries($cleaned),
@@ -69,6 +79,130 @@ class QueryBuilder {
             'queries' => $queries,
             'cleaned_query' => $cleaned,
             'vertical' => $vertical,
+            'intent' => null,
+        ];
+    }
+
+    /**
+     * Build real estate queries from structured intent.
+     * Uses site: operator targeting specific portals.
+     *
+     * Strategy (6-8 queries, budget-conscious):
+     * A) site:portalinmobiliario.com → type + location
+     * B) site:yapo.cl → type + location
+     * C) site:toctoc.com → type + location
+     * D) site:chilepropiedades.cl → type + location
+     * E) site:goplaceit.com → type + location
+     * F) Fallback: generic with portal hints (if above fail)
+     *
+     * Include accent variations for location.
+     */
+    private static function buildFromIntent(string $userMessage): array {
+        $intent = IntentParser::parse($userMessage);
+        $queries = [];
+
+        $type = $intent['tipo_propiedad'] ?? 'propiedad';
+        $location = $intent['ubicacion'] ?? '';
+        $operation = $intent['operacion'] ?? 'venta';
+
+        // Build base terms from intent (NOT raw user text)
+        $baseTerms = [];
+        $baseTerms[] = $type;
+        $baseTerms[] = $operation;
+        if ($location) {
+            $baseTerms[] = $location;
+        }
+
+        // Add surface hint if present
+        if ($intent['superficie']) {
+            $s = $intent['superficie'];
+            if ($s['unit'] === 'ha') {
+                $baseTerms[] = $s['amount'] . ' hectáreas';
+            } else {
+                $baseTerms[] = number_format($s['amount'], 0, ',', '.') . ' m2';
+            }
+        }
+
+        // Add must-have keywords (max 2 to not over-constrain)
+        $mustHave = array_slice($intent['must_have'], 0, 2);
+        foreach ($mustHave as $kw) {
+            $baseTerms[] = $kw;
+        }
+
+        $baseQuery = implode(' ', $baseTerms);
+
+        // Location variations for accent-insensitive queries
+        $locationVariations = $location ? IntentParser::getLocationVariations($location) : [''];
+
+        // === SITE: QUERIES ===
+        // Tier A portals (high trust)
+        $tierAPortals = [
+            'portalinmobiliario.com',
+            'toctoc.com',
+            'goplaceit.com',
+        ];
+
+        // Tier B portals
+        $tierBPortals = [
+            'yapo.cl',
+            'chilepropiedades.cl',
+        ];
+
+        // Optional portals (if we have query budget)
+        $optionalPortals = [
+            'propiedades.emol.com',
+            'icasas.cl',
+        ];
+
+        // Build site: queries for Tier A (3 queries)
+        foreach ($tierAPortals as $portal) {
+            $q = "site:{$portal} {$type} {$operation}";
+            if ($location) {
+                $q .= " {$locationVariations[0]}";
+            }
+            if (!empty($mustHave)) {
+                $q .= ' ' . implode(' ', array_slice($mustHave, 0, 1));
+            }
+            $queries[] = trim($q);
+        }
+
+        // Build site: queries for Tier B (2 queries)
+        foreach ($tierBPortals as $portal) {
+            $q = "site:{$portal} {$type} {$operation}";
+            if ($location) {
+                $q .= " {$locationVariations[0]}";
+            }
+            $queries[] = trim($q);
+        }
+
+        // Optional: accent variation query (1 query)
+        if (count($locationVariations) > 1) {
+            $altLocation = $locationVariations[1];
+            $queries[] = "site:portalinmobiliario.com {$type} {$operation} {$altLocation}";
+        }
+
+        // Fallback: generic query with portal hints (1 query)
+        // Only used if site: queries fail — includes all portals as hints
+        $fallbackQuery = "{$type} {$operation}";
+        if ($location) $fallbackQuery .= " {$locationVariations[0]}";
+        if ($intent['superficie']) {
+            $s = $intent['superficie'];
+            $fallbackQuery .= ' ' . ($s['unit'] === 'ha' ? $s['amount'] . ' hectáreas' : $s['amount'] . ' m2');
+        }
+        $fallbackQuery .= ' portalinmobiliario.com yapo.cl toctoc.com';
+        $queries[] = trim($fallbackQuery);
+
+        // Limit to 8 queries max (SerpAPI budget)
+        $queries = array_slice($queries, 0, 8);
+
+        // Cleaned query for display/caching
+        $cleaned = self::cleanQuery($userMessage, 'real_estate');
+
+        return [
+            'queries' => $queries,
+            'cleaned_query' => $cleaned,
+            'vertical' => 'real_estate',
+            'intent' => $intent,
         ];
     }
 
@@ -93,22 +227,6 @@ class QueryBuilder {
         return $query;
     }
 
-    /**
-     * Real estate queries — use portal names as search hints (no site: operator).
-     */
-    private static function buildRealEstateQueries(string $cleaned): array {
-        $queries = [];
-
-        // 2 queries max to stay within timeout budget (~7s each via SerpAPI)
-        // Query 1: Top portals
-        $queries[] = $cleaned . ' venta portalinmobiliario.com toctoc.com';
-
-        // Query 2: Secondary portals
-        $queries[] = $cleaned . ' venta yapo.cl chilepropiedades.cl goplaceit.com';
-
-        return $queries;
-    }
-
     private static function buildLegalQueries(string $cleaned): array {
         $queries = [];
         $queries[] = $cleaned . ' leychile.cl bcn.cl';
@@ -118,7 +236,6 @@ class QueryBuilder {
 
     private static function buildNewsQueries(string $cleaned): array {
         $queries = [];
-        // Use news portals as hints
         $queries[] = $cleaned . ' latercera.com emol.com cooperativa.cl';
         $queries[] = $cleaned . ' Chile hoy';
         return $queries;

@@ -18,7 +18,7 @@ class DomainPolicy {
             'A' => ['portalinmobiliario.com', 'toctoc.com', 'goplaceit.com'],
             'B' => [
                 'yapo.cl', 'mercadolibre.cl', 'icasas.cl',
-                'chilepropiedades.cl', 'mitula.cl',
+                'chilepropiedades.cl', 'mitula.cl', 'propiedades.emol.com', 'icasas.cl',
             ],
         ],
         'retail' => [
@@ -94,7 +94,7 @@ class DomainPolicy {
         // Real estate
         $reTerms = ['casa', 'depto', 'departamento', 'parcela', 'terreno', 'sitio',
                     'propiedad', 'lote', 'campo', 'arriendo', 'inmueble', 'condominio',
-                    'cabaña', 'hectárea', 'hectarea', ' ha ', ' uf ', 'dormitorio'];
+                    'cabaña', 'hectárea', 'hectarea', ' ha ', ' uf ', 'dormitorio', 'venta', 'propiedad', 'm2', 'm²', 'hectáreas'];
         foreach ($reTerms as $t) {
             if (str_contains($q, $t)) return 'real_estate';
         }
