@@ -6,6 +6,11 @@ define('CLAUDE_API_KEY', getenv('CLAUDE_API_KEY') ?: '');
 define('MODEL', 'claude-sonnet-4-20250514');
 define('MAX_TOKENS', 4096);
 
+// Gemini fallback (used when Claude API is unavailable)
+define('GEMINI_API_KEY', getenv('GEMINI_API_KEY') ?: '');
+define('GEMINI_MODEL', 'gemini-2.0-flash');
+
+
 // Rate limiting
 define('RATE_LIMIT_PER_MINUTE', 10);
 

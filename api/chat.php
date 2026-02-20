@@ -275,6 +275,117 @@ function validateResponseURLs(string $response, array $allowedURLs): array {
     ];
 }
 
+/**
+ * GEMINI FALLBACK — Called when Claude API fails (overloaded, 529, 500, etc.)
+ * Converts Claude message format to Gemini format and calls the API.
+ * 
+ * @param string $systemPrompt The system prompt
+ * @param array $messages Messages in Claude format [{role, content}]
+ * @param int $maxTokens Max output tokens
+ * @return array ['success' => bool, 'reply' => string, 'usage' => [...], 'model' => string]
+ */
+function callGeminiFallback(string $systemPrompt, array $messages, int $maxTokens = 4096): array {
+    if (empty(GEMINI_API_KEY)) {
+        return ['success' => false, 'error' => 'GEMINI_API_KEY not configured'];
+    }
+    
+    // Convert Claude messages to Gemini format
+    // Claude: {role: "user"|"assistant", content: "text"}
+    // Gemini: {role: "user"|"model", parts: [{text: "text"}]}
+    $geminiContents = [];
+    foreach ($messages as $msg) {
+        $role = ($msg['role'] === 'assistant') ? 'model' : 'user';
+        $geminiContents[] = [
+            'role' => $role,
+            'parts' => [['text' => $msg['content']]]
+        ];
+    }
+    
+    // Ensure conversation starts with user (Gemini requirement)
+    if (!empty($geminiContents) && $geminiContents[0]['role'] !== 'user') {
+        array_unshift($geminiContents, [
+            'role' => 'user',
+            'parts' => [['text' => '.']]
+        ]);
+    }
+    
+    // Ensure no consecutive same-role messages (Gemini requirement)
+    $cleaned = [];
+    $lastRole = null;
+    foreach ($geminiContents as $msg) {
+        if ($msg['role'] === $lastRole) {
+            // Merge with previous
+            $lastIdx = count($cleaned) - 1;
+            $prevText = $cleaned[$lastIdx]['parts'][0]['text'];
+            $cleaned[$lastIdx]['parts'][0]['text'] = $prevText . "\n\n" . $msg['parts'][0]['text'];
+        } else {
+            $cleaned[] = $msg;
+            $lastRole = $msg['role'];
+        }
+    }
+    
+    $geminiPayload = [
+        'system_instruction' => [
+            'parts' => [['text' => $systemPrompt]]
+        ],
+        'contents' => $cleaned,
+        'generationConfig' => [
+            'maxOutputTokens' => $maxTokens,
+            'temperature' => 0.7
+        ]
+    ];
+    
+    $url = 'https://generativelanguage.googleapis.com/v1beta/models/' 
+         . GEMINI_MODEL . ':generateContent?key=' . GEMINI_API_KEY;
+    
+    $jsonPayload = json_encode($geminiPayload, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
+    
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_POSTFIELDS => $jsonPayload,
+        CURLOPT_TIMEOUT => 60
+    ]);
+    
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    if ($httpCode !== 200) {
+        error_log("Gemini fallback failed: HTTP {$httpCode} — " . substr($response, 0, 500));
+        return ['success' => false, 'error' => "Gemini HTTP {$httpCode}", 'raw' => substr($response, 0, 500)];
+    }
+    
+    $data = json_decode($response, true);
+    
+    // Extract text from Gemini response
+    $reply = $data['candidates'][0]['content']['parts'][0]['text'] ?? null;
+    if (!$reply) {
+        error_log("Gemini fallback: no text in response — " . substr($response, 0, 500));
+        return ['success' => false, 'error' => 'No text in Gemini response'];
+    }
+    
+    // Extract usage info
+    $usageMetadata = $data['usageMetadata'] ?? [];
+    $inputTokens = $usageMetadata['promptTokenCount'] ?? 0;
+    $outputTokens = $usageMetadata['candidatesTokenCount'] ?? 0;
+    
+    error_log("Gemini fallback SUCCESS: {$inputTokens} in / {$outputTokens} out tokens");
+    
+    return [
+        'success' => true,
+        'reply' => $reply,
+        'usage' => [
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens
+        ],
+        'model' => GEMINI_MODEL
+    ];
+}
+
+
 // --- Determine if we should search ---
 $shouldSearch = false;
 $searchQuery = $message;
@@ -467,11 +578,14 @@ $messages[] = [
     'content' => sanitizeUtf8($userMessage)
 ];
 
-// --- Call Claude API ---
+// --- Call LLM API (Claude primary, Gemini fallback) ---
 $llmStartTime = microtime(true);
+$modelUsed = MODEL;
+$usedFallback = false;
 
 $apiData = [
-    'model' => MODEL,
+    'model' => $modelUsed,
+        'fallback_used' => $usedFallback,
     'max_tokens' => MAX_TOKENS,
     'system' => sanitizeUtf8($systemPrompt),
     'messages' => $messages
@@ -485,33 +599,84 @@ if ($jsonPayload === false) {
     exit;
 }
 
-$ch = curl_init('https://api.anthropic.com/v1/messages');
-curl_setopt_array($ch, [
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_POST => true,
-    CURLOPT_HTTPHEADER => [
-        'Content-Type: application/json',
-        'x-api-key: ' . CLAUDE_API_KEY,
-        'anthropic-version: 2023-06-01'
-    ],
-    CURLOPT_POSTFIELDS => $jsonPayload,
-    CURLOPT_TIMEOUT => 60
-]);
+// Attempt Claude with 1 retry
+$claudeSuccess = false;
+$data = null;
+$reply = null;
 
-$response = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
+for ($attempt = 1; $attempt <= 2; $attempt++) {
+    $ch = curl_init('https://api.anthropic.com/v1/messages');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'x-api-key: ' . CLAUDE_API_KEY,
+            'anthropic-version: 2023-06-01'
+        ],
+        CURLOPT_POSTFIELDS => $jsonPayload,
+        CURLOPT_TIMEOUT => 60
+    ]);
 
-$llmEndTime = microtime(true);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
 
-if ($httpCode !== 200) {
-    http_response_code(500);
-    echo json_encode(['error' => 'API error', 'details' => $response]);
-    exit;
+    if ($httpCode === 200) {
+        $data = json_decode($response, true);
+        $reply = $data['content'][0]['text'] ?? null;
+        if ($reply) {
+            $claudeSuccess = true;
+            break;
+        }
+    }
+    
+    // Check if retryable error
+    $errorData = json_decode($response, true);
+    $errorType = $errorData['error']['type'] ?? '';
+    $isRetryable = in_array($errorType, ['overloaded_error', 'rate_limit_error']) 
+                   || in_array($httpCode, [429, 500, 502, 503, 529]);
+    
+    if (!$isRetryable) break;
+    
+    if ($attempt === 1) {
+        error_log("Claude attempt {$attempt} failed ({$errorType} / HTTP {$httpCode}), retrying in 2s...");
+        sleep(2);
+    }
 }
 
-$data = json_decode($response, true);
-$reply = $data['content'][0]['text'] ?? 'Sin respuesta';
+// If Claude failed, try Gemini fallback
+if (!$claudeSuccess) {
+    error_log("Claude failed after retries. Attempting Gemini fallback...");
+    
+    $geminiResult = callGeminiFallback(
+        sanitizeUtf8($systemPrompt),
+        $messages,
+        MAX_TOKENS
+    );
+    
+    if ($geminiResult['success']) {
+        $reply = $geminiResult['reply'];
+        $modelUsed = $geminiResult['model'];
+        $usedFallback = true;
+        $data = [
+            'usage' => $geminiResult['usage']
+        ];
+        error_log("Gemini fallback succeeded: " . $geminiResult['model']);
+    } else {
+        // Both failed
+        $llmEndTime = microtime(true);
+        error_log("Both Claude and Gemini failed. Gemini: " . ($geminiResult['error'] ?? 'unknown'));
+        http_response_code(500);
+        echo json_encode([
+            'error' => 'API error', 
+            'details' => 'Claude y Gemini no disponibles temporalmente. Intenta en unos minutos.'
+        ]);
+        exit;
+    }
+}
+
+$llmEndTime = microtime(true);
 
 // === RESPONSE VERIFIER — Pre-delivery quality gate ===
 $verifierResult = null;
@@ -601,7 +766,14 @@ $timingLlm = round(($llmEndTime - $llmStartTime) * 1000);
 $inputTokens = $data['usage']['input_tokens'] ?? 0;
 $outputTokens = $data['usage']['output_tokens'] ?? 0;
 
-$costEstimate = ($inputTokens * 3 / 1000000) + ($outputTokens * 15 / 1000000);
+// Cost estimate varies by model
+if ($usedFallback) {
+    // Gemini 2.0 Flash pricing
+    $costEstimate = ($inputTokens * 0.1 / 1000000) + ($outputTokens * 0.4 / 1000000);
+} else {
+    // Claude Sonnet pricing
+    $costEstimate = ($inputTokens * 3 / 1000000) + ($outputTokens * 15 / 1000000);
+}
 
 echo json_encode([
     'response' => $reply,
