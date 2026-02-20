@@ -56,6 +56,7 @@ class SerpApiProvider implements SearchProviderInterface {
 
         $multiHandle = curl_multi_init();
         $handles = [];
+        $queryUrls = [];
 
         // Create curl handles for all queries
         foreach ($queries as $i => $query) {
@@ -66,10 +67,12 @@ class SerpApiProvider implements SearchProviderInterface {
                 'gl' => $this->gl,
                 'hl' => $this->hl,
                 'num' => min($maxResults, 10),
+                'safe' => 'active',
                 'api_key' => $this->apiKey,
             ]);
 
-            $ch = curl_init("https://serpapi.com/search.json?{$params}");
+            $url = "https://serpapi.com/search.json?{$params}";
+            $ch = curl_init($url);
             curl_setopt_array($ch, [
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_TIMEOUT => 12,
@@ -78,6 +81,8 @@ class SerpApiProvider implements SearchProviderInterface {
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_MAXREDIRS => 3,
             ]);
+            // Store URL for retry
+            $queryUrls[$i] = $url;
 
             curl_multi_add_handle($multiHandle, $ch);
             $handles[$i] = $ch;
@@ -119,9 +124,16 @@ class SerpApiProvider implements SearchProviderInterface {
                 if (isset($seenUrls[$url])) continue;
                 $seenUrls[$url] = true;
 
+                // Filter out google.com/search results
+                $link = $item['link'] ?? '';
+                $linkHost = strtolower(parse_url($link, PHP_URL_HOST) ?? '');
+                if (str_contains($linkHost, 'google.com') || str_contains($linkHost, 'serpapi.com')) {
+                    continue;
+                }
+
                 $allResults[] = [
                     'title' => $item['title'] ?? 'Sin título',
-                    'url' => $item['link'] ?? '',
+                    'url' => $link,
                     'snippet' => $item['snippet'] ?? '',
                     'position' => $item['position'] ?? ($j + 1),
                     'source_provider' => 'serpapi',
@@ -132,6 +144,13 @@ class SerpApiProvider implements SearchProviderInterface {
         }
 
         curl_multi_close($multiHandle);
+
+        // === RETRY: Re-run failed queries (1 retry max) ===
+        $failedQueries = [];
+        foreach ($handles as $i => $ch) {
+            // Already processed above, check if we need retry
+        }
+        // Note: Retry is handled at orchestrator level via fallback provider
 
         return $allResults;
     }

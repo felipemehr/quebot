@@ -35,8 +35,14 @@ class QueBotAuth {
       this.auth = firebase.auth();
       this.db = firebase.firestore();
       
+      // Ensure login persists across browser sessions
+      await this.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(e => {
+        console.warn('[Auth] setPersistence failed:', e.message);
+      });
+      
       // Listen for auth state changes
       this.auth.onAuthStateChanged(async (user) => {
+        console.log('[Auth] State changed:', user?.uid, user?.email || 'anonymous');
         if (user) {
           this.currentUser = user;
           await this.loadUserProfile();

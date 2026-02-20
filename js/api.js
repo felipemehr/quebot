@@ -31,6 +31,8 @@ const API = {
                         content: msg.content
                     })),
                     userContext: context,
+                    userId: (typeof queBotAuth !== 'undefined' && queBotAuth.currentUser) ? queBotAuth.currentUser.uid : 'anonymous',
+                    caseId: window.currentCaseId || null,
                     user_profile: (typeof queBotAuth !== 'undefined') ? queBotAuth.getSearchProfile() : null
                 })
             });
