@@ -312,7 +312,9 @@ class SearchOrchestrator {
 
     /**
      * Build pre-formatted context string for Claude.
-     * v2: Includes intent summary, insufficient handling, expansion suggestions.
+     * v3: Separates SPECIFIC properties from LISTING pages.
+     * Claude can ONLY present specific URLs as individual properties.
+     * Listing URLs are "search more here" references only.
      */
     private function buildLLMContext(
         array $results, string $query, string $vertical,
@@ -354,54 +356,91 @@ class SearchOrchestrator {
             return $ctx;
         }
 
-        $ctx .= "🔍 RESULTADOS DE BÚSQUEDA para \"{$query}\" (vertical: {$vertical}):\n";
-        $ctx .= "⛔ REGLA ABSOLUTA: Solo puedes usar URLs que aparezcan LITERALMENTE abajo. "
-              . "NO construyas URLs. NO inventes slugs. NO combines dominios con paths inventados.\n\n";
+        // === SEPARATE RESULTS BY TYPE ===
+        $specificResults = [];
+        $listingResults = [];
+        $otherResults = [];
 
-        $urlList = [];
-
-        foreach ($results as $i => $r) {
-            $num = $i + 1;
+        foreach ($results as $r) {
             $urlType = $r['extracted']['url_type'] ?? 'unknown';
-            $domain = parse_url($r['url'] ?? '', PHP_URL_HOST) ?: 'unknown';
-            $tier = DomainPolicy::getTier($r['url'] ?? '', $vertical);
-            $tierLabel = $tier !== 'none' ? " [Tier {$tier}]" : '';
-            $score = $r['score'] ?? 0;
-
-            $ctx .= "{$num}. [{$urlType}]{$tierLabel} (score: {$score}) {$r['title']}\n";
-            $ctx .= "   URL: {$r['url']}\n";
-            $ctx .= "   Dominio: {$domain}\n";
-
-            if (!empty($r['snippet'])) {
-                $ctx .= "   Extracto: {$r['snippet']}\n";
+            if ($urlType === 'specific') {
+                $specificResults[] = $r;
+            } elseif ($urlType === 'listing') {
+                $listingResults[] = $r;
+            } else {
+                $otherResults[] = $r;
             }
+        }
 
-            $ext = $r['extracted'] ?? [];
-            $dataPoints = [];
-            if (!empty($ext['price_uf'])) $dataPoints[] = "Precio: UF " . number_format($ext['price_uf'], 0, ',', '.');
-            if (!empty($ext['price_clp'])) $dataPoints[] = "Precio: $" . number_format($ext['price_clp'], 0, ',', '.');
-            if (!empty($ext['area_m2'])) $dataPoints[] = "Superficie: " . number_format($ext['area_m2'], 0, ',', '.') . " m²";
-            if (!empty($ext['price_per_m2'])) $dataPoints[] = "Precio/m²: $" . number_format($ext['price_per_m2'], 0, ',', '.');
-            if (!empty($ext['bedrooms'])) $dataPoints[] = $ext['bedrooms'] . " dormitorios";
-            if (!empty($ext['bathrooms'])) $dataPoints[] = $ext['bathrooms'] . " baños";
+        $ctx .= "🔍 RESULTADOS DE BÚSQUEDA para \"{$query}\" (vertical: {$vertical}):\n\n";
 
-            if (!empty($dataPoints)) {
-                $ctx .= "   📊 Datos extraídos: " . implode(' | ', $dataPoints) . "\n";
+        // === CRITICAL RULES ===
+        $ctx .= "═══════════════════════════════════════════\n";
+        $ctx .= "⛔ REGLAS ABSOLUTAS:\n";
+        $ctx .= "1. Solo puedes usar URLs que aparezcan LITERALMENTE abajo\n";
+        $ctx .= "2. NO construyas URLs. NO inventes slugs. NO combines dominios con paths inventados\n";
+        $ctx .= "3. PROPIEDADES ESPECÍFICAS: Solo las de la sección A pueden ir en tablas como propiedades individuales\n";
+        $ctx .= "4. PÁGINAS DE BÚSQUEDA: Las de la sección B son listados generales. NUNCA las presentes como una propiedad individual\n";
+        $ctx .= "5. Si solo hay páginas de búsqueda y ninguna propiedad específica, di que no encontraste propiedades individuales y sugiere los links de búsqueda\n";
+        $ctx .= "═══════════════════════════════════════════\n\n";
+
+        $allValidUrls = [];
+
+        // === SECTION A: SPECIFIC PROPERTIES ===
+        if (!empty($specificResults)) {
+            $ctx .= "━━━ SECCIÓN A: PROPIEDADES ESPECÍFICAS (puedes presentar en tabla) ━━━\n";
+            $num = 0;
+            foreach ($specificResults as $r) {
+                $num++;
+                $this->appendResultToContext($ctx, $r, $num, $vertical);
+                $allValidUrls[] = $r['url'];
             }
-
-            if (!empty($r['scraped_content'])) {
-                $content = substr($r['scraped_content'], 0, 2000);
-                $ctx .= "   📄 Contenido: {$content}\n";
-            }
-
             $ctx .= "\n";
-            $urlList[] = $r['url'];
+        } else {
+            $ctx .= "━━━ SECCIÓN A: PROPIEDADES ESPECÍFICAS ━━━\n";
+            $ctx .= "⚠️ NO se encontraron propiedades individuales con link directo.\n";
+            $ctx .= "NO inventes propiedades. Informa al usuario y sugiere los links de búsqueda de la Sección B.\n\n";
+        }
+
+        // === SECTION B: LISTING/SEARCH PAGES ===
+        if (!empty($listingResults)) {
+            $ctx .= "━━━ SECCIÓN B: PÁGINAS DE BÚSQUEDA (solo para \"buscar más aquí\", NUNCA como propiedad individual) ━━━\n";
+            $num = 0;
+            foreach ($listingResults as $r) {
+                $num++;
+                $domain = parse_url($r['url'] ?? '', PHP_URL_HOST) ?: 'unknown';
+                $ctx .= "{$num}. [LISTADO] {$domain}\n";
+                $ctx .= "   URL: {$r['url']}\n";
+                $ctx .= "   Descripción: Página de búsqueda con múltiples propiedades\n";
+
+                // If scraped content has useful data, mention it
+                if (!empty($r['scraped_content'])) {
+                    // Extract any property data found in the listing page
+                    $content = substr($r['scraped_content'], 0, 2000);
+                    $ctx .= "   📄 Contenido de la página: {$content}\n";
+                }
+                $ctx .= "\n";
+                $allValidUrls[] = $r['url'];
+            }
+            $ctx .= "\n";
+        }
+
+        // === SECTION C: OTHER RESULTS ===
+        if (!empty($otherResults)) {
+            $ctx .= "━━━ SECCIÓN C: OTROS RESULTADOS ━━━\n";
+            $num = 0;
+            foreach ($otherResults as $r) {
+                $num++;
+                $this->appendResultToContext($ctx, $r, $num, $vertical);
+                $allValidUrls[] = $r['url'];
+            }
+            $ctx .= "\n";
         }
 
         // === EXPLICIT URL WHITELIST ===
         $ctx .= "═══════════════════════════════════════════\n";
         $ctx .= "📋 URLS PERMITIDAS (las ÚNICAS que puedes usar como links):\n";
-        foreach ($urlList as $i => $url) {
+        foreach ($allValidUrls as $i => $url) {
             $ctx .= "  " . ($i + 1) . ". {$url}\n";
         }
         $ctx .= "\n⛔ CUALQUIER URL QUE NO ESTÉ EN ESTA LISTA = FABRICACIÓN = FALLO DEL SISTEMA\n";
@@ -414,6 +453,45 @@ class SearchOrchestrator {
               . "aparece aquí, dilo explícitamente. NO inventes datos adicionales.\n";
 
         return $ctx;
+    }
+
+    /**
+     * Append a single result's details to context string.
+     */
+    private function appendResultToContext(string &$ctx, array $r, int $num, string $vertical): void {
+        $urlType = $r['extracted']['url_type'] ?? 'unknown';
+        $domain = parse_url($r['url'] ?? '', PHP_URL_HOST) ?: 'unknown';
+        $tier = DomainPolicy::getTier($r['url'] ?? '', $vertical);
+        $tierLabel = $tier !== 'none' ? " [Tier {$tier}]" : '';
+        $score = $r['score'] ?? 0;
+
+        $ctx .= "{$num}. [{$urlType}]{$tierLabel} (score: {$score}) {$r['title']}\n";
+        $ctx .= "   URL: {$r['url']}\n";
+        $ctx .= "   Dominio: {$domain}\n";
+
+        if (!empty($r['snippet'])) {
+            $ctx .= "   Extracto: {$r['snippet']}\n";
+        }
+
+        $ext = $r['extracted'] ?? [];
+        $dataPoints = [];
+        if (!empty($ext['price_uf'])) $dataPoints[] = "Precio: UF " . number_format($ext['price_uf'], 0, ',', '.');
+        if (!empty($ext['price_clp'])) $dataPoints[] = "Precio: $" . number_format($ext['price_clp'], 0, ',', '.');
+        if (!empty($ext['area_m2'])) $dataPoints[] = "Superficie: " . number_format($ext['area_m2'], 0, ',', '.') . " m²";
+        if (!empty($ext['price_per_m2'])) $dataPoints[] = "Precio/m²: $" . number_format($ext['price_per_m2'], 0, ',', '.');
+        if (!empty($ext['bedrooms'])) $dataPoints[] = $ext['bedrooms'] . " dormitorios";
+        if (!empty($ext['bathrooms'])) $dataPoints[] = $ext['bathrooms'] . " baños";
+
+        if (!empty($dataPoints)) {
+            $ctx .= "   📊 Datos extraídos: " . implode(' | ', $dataPoints) . "\n";
+        }
+
+        if (!empty($r['scraped_content'])) {
+            $content = substr($r['scraped_content'], 0, 2000);
+            $ctx .= "   📄 Contenido: {$content}\n";
+        }
+
+        $ctx .= "\n";
     }
 
     private function cleanResultsForOutput(array $results): array {

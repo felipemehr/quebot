@@ -140,32 +140,59 @@ class Validator {
 
     /**
      * Classify URL as 'specific' (individual property) or 'listing' (search/category page).
+     * v2: Stronger listing detection — if URL has NO numeric ID, it's almost certainly a listing page.
      */
     public static function classifyUrl(string $url): string {
         $urlLower = strtolower($url);
+        $path = parse_url($urlLower, PHP_URL_PATH) ?? '';
 
-        // Specific property patterns
+        // === LISTING PATTERNS (check FIRST — more common in search results) ===
+
+        // Pagination pages are ALWAYS listings
+        if (preg_match('/_Desde_\d+/', $url) || preg_match('/[?&]page=\d+/', $url)) {
+            return 'listing';
+        }
+
+        // Category/filter paths without numeric IDs
+        // e.g. /venta/casa/araucania/temuco or /venta/casa/propiedades-usadas/araucania/temuco
+        $listingPathPatterns = [
+            '/^\/(venta|arriendo|comprar|alquiler)\/(casa|departamento|parcela|terreno|sitio|propiedad)s?\//i',
+            '/\/(buscar|search|results|listings|resultados)(\/|$)/',
+            '/\/(parcelas|casas|departamentos|terrenos|propiedades|avisos)(\/|\?|$)/',
+        ];
+        foreach ($listingPathPatterns as $p) {
+            if (preg_match($p, $path)) {
+                // But if it ALSO has a numeric ID at the end, it might be specific
+                if (preg_match('/\/\d{5,}(\/|$|\?)/', $path) || preg_match('/[-_]\d{6,}/', $path)) {
+                    return 'specific'; // Has property ID → specific
+                }
+                return 'listing'; // No ID → listing page
+            }
+        }
+
+        // Generic category/region paths
+        if (preg_match('/\/(category|region|comuna|sector)\//i', $path)) {
+            return 'listing';
+        }
+
+        // === SPECIFIC PROPERTY PATTERNS ===
+
         $specificPatterns = [
-            '/\/(propiedad|property|listing|ficha|detalle|aviso)\//',
-            '/\/[A-Z0-9]{5,}\/?$/',
-            '/id=\d+/',
-            '/\d{6,}/',
-            '/-(casa|depto|departamento|parcela|terreno|sitio)-.*-\d+/',
-            '/\/publicacion\//',
-            '/\/inmueble\//',
+            '/\/(propiedad|property|ficha|detalle|aviso|publicacion|inmueble)\//i',
+            '/\/[A-Z0-9]{5,}\/?$/i',  // Hash-like IDs
+            '/[?&]id=\d+/',
+            '/\/\d{6,}(\/|$)/',       // Numeric ID in path (6+ digits)
+            '/[-_]\d{6,}/',             // ID after dash/underscore
+            '/-(casa|depto|departamento|parcela|terreno|sitio)-.*-\d{4,}/',
+            '/\/MLC-\d+/',             // MercadoLibre pattern
         ];
         foreach ($specificPatterns as $p) {
             if (preg_match($p, $urlLower)) return 'specific';
         }
 
-        // Listing patterns
-        $listingPatterns = [
-            '/\/(venta|arriendo|comprar|buscar|search|results|listings)\//',
-            '/\/(parcelas|casas|departamentos|terrenos|propiedades)\//',
-            '/category|region|comuna|sector/',
-        ];
-        foreach ($listingPatterns as $p) {
-            if (preg_match($p, $urlLower)) return 'listing';
+        // If URL ends with a numeric segment (property ID), likely specific
+        if (preg_match('/\/\d{4,}\/?$/', $path)) {
+            return 'specific';
         }
 
         return 'unknown';
