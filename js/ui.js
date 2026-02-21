@@ -473,7 +473,7 @@ const UI = {
      * Actualizar contenido del último mensaje del asistente
      */
     updateLastAssistantMessage(content) {
-        const messages = this.elements.messagesList.querySelectorAll('.message.assistant');
+        const messages = this.elements.messagesList.querySelectorAll('.message.assistant:not(.thinking-log-container)');
         if (messages.length > 0) {
             const lastMessage = messages[messages.length - 1];
             const bodyEl = lastMessage.querySelector('.message-body');
@@ -750,27 +750,34 @@ const UI = {
                 last.classList.remove('active');
                 last.classList.add('completed');
                 const icon = last.querySelector('.step-icon');
-                if (icon) icon.innerHTML = '✓';
+                if (icon) icon.innerHTML = '\u2713';
             }
         }
 
-        // Add "writing" step
+        // Add "writing" step  
         this.addThinkingStep('writing', 'Escribiendo respuesta...');
 
-        // Small delay then remove thinking log and start message
+        // Create message bubble IMMEDIATELY (no delay)
+        // Thinking log stays visible and scrolls up naturally
+        this._streamMessageAppended = true;
+        this.appendMessage({
+            id: Date.now(),
+            role: 'assistant',
+            content: '',
+            timestamp: new Date().toISOString()
+        }, true);
+
+        // Fade out thinking log after a short moment (it scrolls up naturally)
         setTimeout(() => {
             const thinkingContainer = document.querySelector('.thinking-log-container');
-            if (thinkingContainer) thinkingContainer.remove();
-
-            // Append empty assistant message for streaming
-            this._streamMessageAppended = true;
-            this.appendMessage({
-                id: Date.now(),
-                role: 'assistant',
-                content: '',
-                timestamp: new Date().toISOString()
-            }, true);
-        }, 400);
+            if (thinkingContainer) {
+                thinkingContainer.style.transition = 'opacity 0.6s ease, max-height 0.6s ease';
+                thinkingContainer.style.opacity = '0';
+                thinkingContainer.style.maxHeight = '0';
+                thinkingContainer.style.overflow = 'hidden';
+                setTimeout(() => thinkingContainer.remove(), 700);
+            }
+        }, 1500);
     },
 
     /**
@@ -779,14 +786,16 @@ const UI = {
     appendStreamToken(token) {
         this._streamBuffer += token;
 
-        // Throttle re-renders to max ~8fps for performance
+        // Throttle re-renders to ~15fps for smooth progressive display
         if (!this._tokenRenderPending) {
             this._tokenRenderPending = true;
             if (this._tokenRenderTimer) cancelAnimationFrame(this._tokenRenderTimer);
             this._tokenRenderTimer = requestAnimationFrame(() => {
                 this._tokenRenderPending = false;
+                // Only render when message bubble exists
                 if (this._streamMessageAppended) {
                     this.updateLastAssistantMessage(this._streamBuffer);
+                    this.scrollToBottom();
                 }
             });
         }

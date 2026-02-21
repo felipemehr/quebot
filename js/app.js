@@ -462,16 +462,8 @@ const App = {
             messagesForApi,
             // onChunk (SSE: called per token)
             (chunk, fullContent, vizData) => {
-                if (!messageAppended) {
-                    // First token already handled by startStreaming callback
-                    if (UI._streamMessageAppended) {
-                        messageAppended = true;
-                    }
-                }
-                // Use appendStreamToken for throttled rendering
-                if (messageAppended || UI._streamMessageAppended) {
-                    UI.appendStreamToken(''); // trigger render of accumulated buffer
-                }
+                // Always buffer tokens — UI renders when message bubble is ready
+                UI.appendStreamToken(chunk);
                 assistantContent = fullContent;
                 if (vizData) this.lastVizData = vizData;
             },
