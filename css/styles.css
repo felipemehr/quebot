@@ -1757,3 +1757,106 @@ textarea {
         height: 4px;
     }
 }
+
+/* ================================================
+   SSE Thinking Log — Real pipeline steps
+   ================================================ */
+.thinking-log {
+    padding: 4px 0;
+    max-width: 480px;
+}
+
+.thinking-log-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.thinking-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-secondary, #6b7280);
+    opacity: 0;
+    animation: fadeInStep 0.35s ease forwards;
+}
+
+.thinking-step .step-icon {
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.thinking-step.completed .step-icon {
+    color: #22c55e;
+}
+
+.thinking-step.active {
+    color: var(--text-primary, #1f2937);
+    font-weight: 500;
+}
+
+.thinking-step.active .step-icon {
+    color: var(--accent-color, #1a5f2a);
+}
+
+.step-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(128,128,128,0.2);
+    border-top-color: var(--accent-color, #1a5f2a);
+    border-radius: 50%;
+    animation: spinStep 0.7s linear infinite;
+    display: inline-block;
+}
+
+@keyframes fadeInStep {
+    from {
+        opacity: 0;
+        transform: translateX(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes spinStep {
+    to { transform: rotate(360deg); }
+}
+
+/* Dark mode adjustments */
+[data-theme="dark"] .thinking-step {
+    color: rgba(255,255,255,0.5);
+}
+
+[data-theme="dark"] .thinking-step.active {
+    color: rgba(255,255,255,0.9);
+}
+
+[data-theme="dark"] .thinking-step.completed .step-icon {
+    color: #4ade80;
+}
+
+[data-theme="dark"] .step-spinner {
+    border-color: rgba(255,255,255,0.1);
+    border-top-color: #4ade80;
+}
+
+/* Mobile: slightly smaller */
+@media (max-width: 768px) {
+    .thinking-log {
+        max-width: 100%;
+    }
+    .thinking-step {
+        font-size: 12px;
+        gap: 8px;
+    }
+}

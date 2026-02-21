@@ -80,6 +80,7 @@ class DomainPolicy {
     /**
      * Auto-detect vertical from user query.
      */
+
     public static function detectVertical(string $query): string {
         $q = mb_strtolower($query);
 
@@ -91,12 +92,52 @@ class DomainPolicy {
             if (str_contains($q, $t)) return 'legal';
         }
 
-        // Real estate
-        $reTerms = ['casa', 'depto', 'departamento', 'parcela', 'terreno', 'sitio',
-                    'propiedad', 'lote', 'campo', 'arriendo', 'inmueble', 'condominio',
-                    'cabaña', 'hectárea', 'hectarea', ' ha ', ' uf ', 'dormitorio', 'venta', 'propiedad', 'm2', 'm²', 'hectáreas'];
-        foreach ($reTerms as $t) {
-            if (str_contains($q, $t)) return 'real_estate';
+        // Financial / Currency — BEFORE real_estate to prevent UF/dólar misclassification
+        $financialTerms = ['dólar', 'dolar', 'euro', 'tipo de cambio', 'divisa', 'moneda',
+                           'cotización', 'cotizacion', 'cambio de', 'peso chileno', 'bitcoin',
+                           'criptomoneda', 'tasa de interés', 'inflación', 'inflacion',
+                           'bolsa de', 'acciones de', 'inversión en', 'inversion en'];
+        $strongPropertyTerms = ['casa', 'depto', 'departamento', 'parcela', 'terreno', 'sitio',
+                                'propiedad', 'lote', 'campo', 'inmueble', 'condominio',
+                                'cabaña', 'cabana', 'hectárea', 'hectarea', 'fundo', 'chacra'];
+        
+        $hasFinancial = false;
+        foreach ($financialTerms as $t) {
+            if (str_contains($q, $t)) { $hasFinancial = true; break; }
+        }
+        
+        $hasStrongProperty = false;
+        foreach ($strongPropertyTerms as $t) {
+            if (str_contains($q, $t)) { $hasStrongProperty = true; break; }
+        }
+        
+        // If financial terms present WITHOUT strong property terms → financial
+        if ($hasFinancial && !$hasStrongProperty) {
+            return 'financial';
+        }
+
+        // Real estate — requires at least one strong property term
+        // OR weak terms (uf, m2, dormitorio, venta, arriendo) combined with property context
+        if ($hasStrongProperty) {
+            return 'real_estate';
+        }
+        
+        // Weak real estate terms — only classify as real_estate if no financial override
+        $weakReTerms = [' uf ', 'dormitorio', 'm2', 'm²', 'hectáreas', 'arriendo'];
+        $hasWeakRE = false;
+        foreach ($weakReTerms as $t) {
+            if (str_contains($q, $t)) { $hasWeakRE = true; break; }
+        }
+        
+        // "venta" is ambiguous — "venta de casa" = RE, "venta de dólar" = financial
+        if (str_contains($q, 'venta') && !$hasFinancial) {
+            $hasWeakRE = true;
+        }
+        
+        // Weak RE terms alone → real_estate (e.g., "uf hoy" → might be RE context)
+        // But NOT if financial terms are present
+        if ($hasWeakRE && !$hasFinancial) {
+            return 'real_estate';
         }
 
         // News
@@ -114,29 +155,5 @@ class DomainPolicy {
         }
 
         return 'general';
-    }
-
-    /**
-     * Get site: filter string for a vertical (for query augmentation).
-     * Returns sites for Tier A only.
-     */
-    public static function getSiteFilter(string $vertical): string {
-        $tierA = self::$domains[$vertical]['A'] ?? [];
-        if (empty($tierA)) return '';
-        // Return top 3 sites for query augmentation
-        $top = array_slice($tierA, 0, 3);
-        return implode(' OR ', array_map(fn($d) => "site:$d", $top));
-    }
-
-    /**
-     * Check if a URL belongs to any whitelisted domain in any vertical.
-     */
-    public static function isWhitelisted(string $urlOrDomain): bool {
-        foreach (self::$domains as $vertical => $tiers) {
-            if (self::getTier($urlOrDomain, $vertical) !== 'none') {
-                return true;
-            }
-        }
-        return false;
     }
 }
