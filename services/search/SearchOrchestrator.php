@@ -204,7 +204,7 @@ class SearchOrchestrator {
                 $shouldScrape = true;
             } elseif ($urlType === 'specific') {
                 $shouldScrape = true;
-            } elseif (DomainPolicy::isWhitelisted($r['url'] ?? '')) {
+            } elseif (DomainPolicy::getTier($r['url'] ?? '', $vertical) !== 'none') {
                 $shouldScrape = true;
             } elseif ($scraped < 3) {
                 $shouldScrape = true;
@@ -555,7 +555,61 @@ class SearchOrchestrator {
 
         $ctx .= "🔍 RESULTADOS DE BÚSQUEDA para \"{$query}\" (vertical: {$vertical}):\n\n";
 
-        // === CRITICAL RULES ===
+        $allValidUrls = [];
+
+        // === NON-REAL-ESTATE VERTICAL: Simple info format ===
+        if ($vertical !== 'real_estate') {
+            $ctx .= "═══════════════════════════════════════════\n";
+            $ctx .= "⛔ REGLAS: Solo usa URLs listadas abajo. NO inventes datos ni enlaces.\n";
+            $ctx .= "═══════════════════════════════════════════\n\n";
+
+            $allResults = array_merge($specificResults, $listingResults, $otherResults);
+            $ctx .= "━━━ RESULTADOS ENCONTRADOS ━━━\n";
+            $num = 0;
+            foreach ($allResults as $r) {
+                $num++;
+                $title = $r['title'] ?? 'Sin título';
+                $url = $r['url'] ?? '';
+                $snippet = $r['snippet'] ?? '';
+                $scraped = $r['scraped_content'] ?? '';
+
+                $ctx .= "{$num}. {$title}\n";
+                if ($url) {
+                    $ctx .= "   URL: {$url}\n";
+                    $allValidUrls[] = $url;
+                }
+                if ($snippet) {
+                    $ctx .= "   Resumen: {$snippet}\n";
+                }
+                if ($scraped) {
+                    $content = substr($scraped, 0, 3000);
+                    $ctx .= "   📄 Contenido extraído: {$content}\n";
+                }
+                $ctx .= "\n";
+            }
+
+            if (empty($allResults)) {
+                $ctx .= "⚠️ No se encontraron resultados relevantes.\n";
+            }
+
+            // Skip property-specific sections, jump to URL whitelist
+            $ctx .= "\n";
+            // URL whitelist
+            $ctx .= "═══════════════════════════════════════════\n";
+            $ctx .= "📋 URLS PERMITIDAS (las ÚNICAS que puedes usar como links):\n";
+            foreach ($allValidUrls as $i => $url) {
+                $ctx .= "  " . ($i + 1) . ". {$url}\n";
+            }
+            $ctx .= "\n⛔ CUALQUIER URL QUE NO ESTÉ EN ESTA LISTA = FABRICACIÓN\n";
+            $ctx .= "═══════════════════════════════════════════\n";
+
+            $ctx .= "\n⚠️ FIN DE RESULTADOS. Toda información en tu respuesta DEBE provenir "
+                  . "exclusivamente de los datos anteriores.\n";
+
+            return $ctx;
+        }
+
+        // === REAL ESTATE VERTICAL: Full property-oriented format ===
         $ctx .= "═══════════════════════════════════════════\n";
         $ctx .= "⛔ REGLAS ABSOLUTAS:\n";
         $ctx .= "1. Solo puedes usar URLs que aparezcan LITERALMENTE abajo\n";
@@ -565,8 +619,6 @@ class SearchOrchestrator {
         $ctx .= "5. Si solo hay páginas de búsqueda y ninguna propiedad específica, di que no encontraste propiedades individuales\n";
         $ctx .= "6. Si hay advertencias de validación (⚠️), menciónalas al usuario\n";
         $ctx .= "═══════════════════════════════════════════\n\n";
-
-        $allValidUrls = [];
 
         // === SECTION A: SPECIFIC PROPERTIES ===
         if (!empty($specificResults)) {

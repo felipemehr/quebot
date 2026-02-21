@@ -32,7 +32,31 @@ class ProfileBuilder {
     /**
      * Determine if a message is worth extracting preferences from.
      */
-    public function shouldExtract(string $message): bool {
+    /**
+     * Known button/template messages — low confidence for profiling.
+     */
+    private const BUTTON_TEMPLATES = [
+        'compara precios del dólar',
+        'noticias importantes de chile',
+        'principales noticias de chile',
+        'buscar propiedades en',
+        'parcelas y casas en',
+    ];
+
+    /**
+     * Check if a message came from a button/template click.
+     */
+    public function isButtonMessage(string $message): bool {
+        $msg = mb_strtolower(trim($message));
+        foreach (self::BUTTON_TEMPLATES as $template) {
+            if (str_starts_with($msg, $template)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+        public function shouldExtract(string $message): bool {
         $msg = trim($message);
         if (mb_strlen($msg) < 12) return false;
 
@@ -69,8 +93,14 @@ class ProfileBuilder {
 
         // Detect if user used direct filter language (stronger signal)
         $hasDirectFilter = $this->detectDirectFilter($userMessage);
+        
+        // Button/template messages get low_confidence treatment
+        $isButton = $this->isButtonMessage($userMessage);
+        if ($isButton) {
+            $hasDirectFilter = false; // Never treat button clicks as strong signals
+        }
 
-        $prompt = $this->buildExtractionPrompt($userMessage, $existingJson, $hasDirectFilter);
+        $prompt = $this->buildExtractionPrompt($userMessage, $existingJson, $hasDirectFilter, $isButton);
 
         $requestData = [
             'model' => $this->model,
@@ -130,8 +160,14 @@ class ProfileBuilder {
     /**
      * Build the extraction prompt — ONLY user-declared preferences.
      */
-    private function buildExtractionPrompt(string $userMessage, string $existingJson, bool $hasDirectFilter): string {
+    private function buildExtractionPrompt(string $userMessage, string $existingJson, bool $hasDirectFilter, bool $isButton = false): string {
         $prompt = "Analiza SOLO el mensaje del USUARIO. Extrae preferencias EXPLÍCITAS que el usuario declara.\n\n";
+        
+        if ($isButton) {
+            $prompt .= "⚠️ ATENCIÓN: Este mensaje viene de un BOTÓN PREDEFINIDO (plantilla), NO de texto libre del usuario.\n";
+            $prompt .= "NO extraigas ubicaciones ni preferencias de este mensaje — es genérico, no refleja intención real del usuario.\n";
+            $prompt .= "Solo extrae interests (categoría general de interés) si aplica. Responde {} para todo lo demás.\n\n";
+        }
         $prompt .= "PERFIL ACTUAL:\n{$existingJson}\n\n";
         $prompt .= "MENSAJE DEL USUARIO:\n{$userMessage}\n\n";
         
@@ -141,7 +177,9 @@ class ProfileBuilder {
         $prompt .= "3. NO extraer ubicaciones mencionadas como ejemplo o referencia\n";
         $prompt .= "4. SI el usuario dice 'busco en X' o 'solo X' → es preferencia FUERTE\n";
         $prompt .= "5. SI el usuario pregunta sobre X sin decir que QUIERE algo ahí → NO es preferencia\n";
-        $prompt .= "6. Preguntas sobre noticias/dólar/UF/política → NO son preferencias inmobiliarias\n\n";
+        $prompt .= "6. Preguntas sobre noticias/dólar/UF/política → NO son preferencias inmobiliarias\n";
+        $prompt .= "7. Si el mensaje menciona ciudades EN CONTEXTO de noticias o finanzas → NO extraer como ubicación de interés\n";
+        $prompt .= "8. Solo extraer ubicaciones si el usuario BUSCA, QUIERE, o NECESITA algo en ese lugar\n\n";
 
         $prompt .= "Responde SOLO JSON válido (sin markdown, sin ```):\n";
         $prompt .= "{\n";
