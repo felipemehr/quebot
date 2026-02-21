@@ -588,7 +588,12 @@ if ($shouldSearch) {
         }
     } catch (\Throwable $e) {
         error_log("SearchOrchestrator error: " . $e->getMessage());
-        $searchContext = "\n\n🔍 BÚSQUEDA para \"{$searchQuery}\": Error en la búsqueda. Informa al usuario que hubo un problema técnico buscando y sugiere buscar directamente en portalinmobiliario.com, yapo.cl, toctoc.com\n";
+        $detectedVertical = $vertical ?? 'unknown';
+        if ($detectedVertical === 'real_estate') {
+            $searchContext = "\n\n🔍 BÚSQUEDA para \"{$searchQuery}\": Error en la búsqueda. Informa al usuario que hubo un problema técnico buscando propiedades. Puede intentar nuevamente en unos minutos. Como alternativa, puede buscar directamente en portalinmobiliario.com, yapo.cl, toctoc.com\n";
+        } else {
+            $searchContext = "\n\n🔍 BÚSQUEDA para \"{$searchQuery}\": Error en la búsqueda. No se obtuvieron resultados de búsqueda. Informa al usuario que hubo un problema técnico y puede intentar nuevamente en unos minutos. NO menciones portales inmobiliarios ni sitios de propiedades — esta consulta no es inmobiliaria.\n";
+        }
     }
 }
 
