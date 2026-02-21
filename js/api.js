@@ -30,7 +30,10 @@ const API = {
                         role: msg.role,
                         content: msg.content
                     })),
-                    userContext: context
+                    userContext: context,
+                    userId: (typeof queBotAuth !== 'undefined' && queBotAuth.currentUser) ? queBotAuth.currentUser.uid : 'anonymous',
+                    caseId: window.currentCaseId || null,
+                    user_profile: (typeof queBotAuth !== 'undefined') ? queBotAuth.getSearchProfile() : null
                 })
             });
 
@@ -52,6 +55,7 @@ const API = {
             const metadata = data.metadata || {};
             metadata.searched = data.searched || false;
             metadata.legal_used = data.legalResults || false;
+            metadata.profile_update = data.profile_update || null;
 
             // Call chunk callback with full content
             onChunk(textContent, textContent, vizData);
