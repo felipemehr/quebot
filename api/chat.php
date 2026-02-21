@@ -527,6 +527,17 @@ $ragEndTime = microtime(true);
 // --- Build messages for Claude ---
 $systemPrompt = SYSTEM_PROMPT . $ufContext . buildProfileContext($userProfile);
 
+// --- Advisor Enhancement Layer (property searches only) ---
+if ($searchVertical === 'real_estate' && $searchValidListings > 0) {
+    $advisorPath = __DIR__ . '/../config/prompts/advisor_enhancement.txt';
+    if (file_exists($advisorPath)) {
+        $advisorPrompt = file_get_contents($advisorPath);
+        if ($advisorPrompt !== false) {
+            $systemPrompt .= "\n\n" . $advisorPrompt;
+        }
+    }
+}
+
 $messages = [];
 
 $history = array_slice($conversationHistory, -20);

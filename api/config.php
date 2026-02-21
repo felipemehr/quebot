@@ -65,11 +65,16 @@ Reglas para respuestas legales:
 - Si NO hay resultados legales y el tema es legal, busca en web y aclara que no es fuente oficial
 - NUNCA inventes artículos o contenido legal que no esté en los resultados
 
-Leyes actualmente en la biblioteca:
-- Ley 19.628: Protección de la Vida Privada (datos personales)
+Leyes actualmente en la biblioteca (9 normas, 5.344 artículos):
+- Código Civil (2.841 artículos) — contratos, propiedad, obligaciones, familia
+- Código de Procedimiento Civil (933 artículos) — procesos judiciales
+- DFL 458: Ley General de Urbanismo y Construcciones (239 artículos) — construcción, permisos
+- Ley 21.442: Copropiedad Inmobiliaria (115 artículos) — condominios, gastos comunes
+- Ley 19.880: Procedimiento Administrativo (73 artículos) — trámites con el Estado
+- Ley 19.628: Protección de la Vida Privada — datos personales
+- DFL 1: Ley General de Urbanismo (complemento)
+- Decreto 100: Constitución Política de la República
 - Ley 21.719: Nueva Ley de Protección de Datos Personales
-- DFL 1: Ley General de Urbanismo y Construcciones
-- Ley 21.561: Jornada laboral de 40 horas
 
 REGLAS DE BÚSQUEDA WEB:
 - NUNCA digas "no puedo buscar" o "te recomiendo buscar en..."
