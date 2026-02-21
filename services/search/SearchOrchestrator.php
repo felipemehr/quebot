@@ -204,7 +204,7 @@ class SearchOrchestrator {
                 $shouldScrape = true;
             } elseif ($urlType === 'specific') {
                 $shouldScrape = true;
-            } elseif (DomainPolicy::isWhitelisted($r['url'] ?? '')) {
+            } elseif (DomainPolicy::getTier($r['url'] ?? '', $vertical) !== 'none') {
                 $shouldScrape = true;
             } elseif ($scraped < 3) {
                 $shouldScrape = true;
