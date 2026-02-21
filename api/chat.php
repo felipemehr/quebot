@@ -121,7 +121,12 @@ function buildProfileContext(?array $profile): string {
 
     $locs = $profile['locations'] ?? [];
     if (!empty($locs)) {
-        $lines[] = "- Zonas de interés: " . implode(', ', $locs);
+        if (count($locs) === 1) {
+            $lines[] = "- Zona principal de interés: " . $locs[0];
+        } else {
+            $lines[] = "- Zona principal: " . $locs[0] . " (también ha consultado: " . implode(', ', array_slice($locs, 1)) . ")";
+            $lines[] = "  ⚠️ Si el usuario dice 'mi zona' o 'donde me interesa' sin especificar, PREGUNTA cuál ubicación prefiere. NO asumas una.";
+        }
     }
 
     $types = $profile['property_types'] ?? [];
