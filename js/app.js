@@ -41,6 +41,14 @@ const App = {
         // Configurar event listeners
         this.setupEventListeners();
 
+        // Register SSE streaming callbacks
+        API.onStep((stage, detail) => {
+            UI.addThinkingStep(stage, detail);
+        });
+        API.onStreamStart(() => {
+            UI.startStreaming();
+        });
+
         // Verificar estado de la API
         this.checkApiStatus();
 
@@ -433,8 +441,8 @@ const App = {
             }
         }
 
-        // Mostrar indicador de typing contextual
-        UI.addTypingIndicator(content);
+        // Show thinking log (SSE will populate with real steps)
+        UI.addThinkingLog();
 
         // Preparar mensajes para la API
         const messagesForApi = chat.messages.slice(-20);
@@ -452,14 +460,17 @@ const App = {
         // Enviar a la API
         await API.sendMessage(
             messagesForApi,
-            // onChunk
+            // onChunk (SSE: called per token)
             (chunk, fullContent, vizData) => {
                 if (!messageAppended) {
-                    UI.removeTypingIndicator();
-                    UI.appendMessage({ ...assistantMessage, content: fullContent }, true);
-                    messageAppended = true;
-                } else {
-                    UI.updateLastAssistantMessage(fullContent);
+                    // First token already handled by startStreaming callback
+                    if (UI._streamMessageAppended) {
+                        messageAppended = true;
+                    }
+                }
+                // Use appendStreamToken for throttled rendering
+                if (messageAppended || UI._streamMessageAppended) {
+                    UI.appendStreamToken(''); // trigger render of accumulated buffer
                 }
                 assistantContent = fullContent;
                 if (vizData) this.lastVizData = vizData;
@@ -467,8 +478,11 @@ const App = {
             // onComplete
             (finalContent, vizData, metadata) => {
                 UI.removeTypingIndicator();
-                if (!messageAppended) {
+                if (!messageAppended && !UI._streamMessageAppended) {
                     UI.appendMessage({ ...assistantMessage, content: finalContent }, true);
+                } else {
+                    // Final render with complete content (ensures markdown is correct)
+                    UI.updateLastAssistantMessage(finalContent);
                 }
 
                 // Guardar mensaje del asistente en localStorage
