@@ -136,6 +136,29 @@ class IntentParser {
         // Sur extremo
         'punta arenas' => 'Punta Arenas', 'coyhaique' => 'Coyhaique',
         'puerto natales' => 'Puerto Natales',
+        // Lagos (geographic features as locations)
+        'lago calafquen' => 'Lago Calafquén', 'lago calafquén' => 'Lago Calafquén',
+        'calafquen' => 'Lago Calafquén', 'calafquén' => 'Lago Calafquén',
+        'lago villarrica' => 'Lago Villarrica',
+        'lago llanquihue' => 'Lago Llanquihue',
+        'lago rapel' => 'Lago Rapel', 'rapel' => 'Lago Rapel',
+        'lago ranco' => 'Lago Ranco',
+        'lago caburgua' => 'Lago Caburgua', 'caburgua' => 'Lago Caburgua',
+        'lago colico' => 'Lago Cólico', 'lago cólico' => 'Lago Cólico',
+        'colico' => 'Lago Cólico', 'cólico' => 'Lago Cólico',
+        'lago panguipulli' => 'Lago Panguipulli',
+        'lago todos los santos' => 'Lago Todos Los Santos',
+        'lago budi' => 'Lago Budi', 'budi' => 'Lago Budi',
+        'lago chapo' => 'Lago Chapo', 'chapo' => 'Lago Chapo',
+        'lago puyehue' => 'Lago Puyehue', 'puyehue' => 'Lago Puyehue',
+        'lago rupanco' => 'Lago Rupanco', 'rupanco' => 'Lago Rupanco',
+        'lago riñihue' => 'Lago Riñihue', 'rinihue' => 'Lago Riñihue',
+        'lago pirihueico' => 'Lago Pirihueico', 'pirihueico' => 'Lago Pirihueico',
+        'lago neltume' => 'Lago Neltume', 'neltume' => 'Neltume',
+        'lago general carrera' => 'Lago General Carrera',
+        // Ríos y costas
+        'lago vichuquen' => 'Lago Vichuquén', 'vichuquen' => 'Lago Vichuquén',
+        'vichuquén' => 'Lago Vichuquén',
     ];
 
     /** Keywords that indicate must-have features */
@@ -303,6 +326,28 @@ class IntentParser {
             if (!in_array($candidate, $nonLocations) && mb_strlen($candidate) > 2) {
                 $spec['ubicacion'] = ucwords($candidate);
                 $spec['ubicacion_raw'] = $candidate;
+            }
+        }
+
+        // --- Geographic feature as location fallback (lago/río/volcán + name) ---
+        if (!$spec['ubicacion']) {
+            if (preg_match('/\b(lago|laguna|río|rio|volcán|volcan|isla)\s+([a-záéíóúñü]{3,})/iu', $q, $geoM)) {
+                $geoType = ucfirst(mb_strtolower($geoM[1]));
+                // Normalize río/volcán
+                $geoType = str_replace(['Rio', 'Volcan'], ['Río', 'Volcán'], $geoType);
+                $geoName = ucfirst(mb_strtolower($geoM[2]));
+                $spec['ubicacion'] = "$geoType $geoName";
+                $spec['ubicacion_raw'] = mb_strtolower(trim($geoM[0]));
+                $spec['contexto']['urbano_rural'] = 'rural';
+            }
+        }
+
+        // If location is a lake, auto-add "orilla de lago" as feature context
+        if ($spec['ubicacion'] && str_starts_with($spec['ubicacion'], 'Lago ')) {
+            if (!in_array('orilla de lago', $spec['must_have'])) {
+                // Don't force it as must_have (user might want nearby, not waterfront)
+                // But set rural context
+                $spec['contexto']['urbano_rural'] = 'rural';
             }
         }
 
