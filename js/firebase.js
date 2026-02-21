@@ -236,14 +236,33 @@ class QueBotAuth {
   async saveSearchProfile(profileData) {
     if (!this.currentUser || !this.db || !profileData) return;
     try {
-      const existing = this.searchProfile || {};
-      const merged = { ...existing };
+      // Profile v2: backend already does weighted merge — save directly
+      const isV2 = profileData.profile_version === 2;
       
-      for (const [key, value] of Object.entries(profileData)) {
-        if (Array.isArray(value) && Array.isArray(existing[key])) {
-          merged[key] = [...new Set([...existing[key], ...value])];
-        } else if (value !== null && value !== undefined) {
-          merged[key] = value;
+      let merged;
+      if (isV2) {
+        // v2: Backend handled all merge logic with weights/confidence
+        // Just save what backend returned
+        merged = profileData;
+      } else {
+        // v1 legacy: simple merge for backward compatibility
+        const existing = this.searchProfile || {};
+        merged = { ...existing };
+        
+        for (const [key, value] of Object.entries(profileData)) {
+          if (Array.isArray(value) && Array.isArray(existing[key])) {
+            // For v1 flat arrays, deduplicate
+            const existingNames = existing[key].map(i => 
+              typeof i === 'string' ? i.toLowerCase() : (i.name || '').toLowerCase()
+            );
+            const newItems = value.filter(v => {
+              const name = typeof v === 'string' ? v.toLowerCase() : (v.name || '').toLowerCase();
+              return !existingNames.includes(name);
+            });
+            merged[key] = [...existing[key], ...newItems];
+          } else if (value !== null && value !== undefined) {
+            merged[key] = value;
+          }
         }
       }
       
@@ -255,7 +274,7 @@ class QueBotAuth {
       );
       
       this.searchProfile = merged;
-      console.log('Search profile saved:', Object.keys(merged).length, 'fields');
+      console.log('Search profile saved (v' + (isV2 ? '2' : '1') + '):', Object.keys(merged).length, 'fields');
     } catch (error) {
       console.error('Save search profile error:', error);
     }

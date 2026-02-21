@@ -446,11 +446,60 @@ function showProfile(userId) {
                 purpose: '🎯 Propósito',
                 family_info: '👨‍👩‍👧 Info familiar',
                 key_requirements: '📋 Requisitos clave',
-                top_searches: '🔍 Búsquedas principales'
+                interests: '⭐ Intereses',
+                top_searches: '🔍 Búsquedas principales',
+                behavioral_signals: '📊 Señales de comportamiento',
+                profile_confidence_score: '🎯 Confianza del perfil'
             };
             for (const [key, value] of Object.entries(profile)) {
+                if (key === 'updated_at' || key === 'last_sanitized' || key === 'profile_version') continue;
                 const label = labels[key] || key;
-                let display = Array.isArray(value) ? value.join(', ') : String(value);
+                let display;
+                
+                // v2: Handle weighted array items [{name, confidence, mentions}]
+                if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0].name) {
+                    display = value.map(item => {
+                        const conf = item.confidence !== undefined ? (item.confidence * 100).toFixed(0) : '?';
+                        const mentions = item.mentions || 1;
+                        const confColor = conf >= 70 ? '#10b981' : conf >= 40 ? '#f59e0b' : '#ef4444';
+                        return '<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;background:#f3f4f6;border-radius:12px;font-size:13px">' 
+                            + item.name 
+                            + ' <span style="color:' + confColor + ';font-size:11px">' + conf + '%</span>'
+                            + ' <span style="color:#9ca3af;font-size:10px">(' + mentions + 'x)</span>'
+                            + '</span>';
+                    }).join('');
+                } else if (key === 'behavioral_signals' && typeof value === 'object') {
+                    const dom = value.dominant_intent || '-';
+                    const pct = value.dominant_pct || 0;
+                    const dist = value.intent_distribution || {};
+                    display = '<strong>' + dom + '</strong> (' + pct + '%)';
+                    display += '<div style="font-size:11px;color:#6b7280;margin-top:4px">';
+                    for (const [intent, count] of Object.entries(dist)) {
+                        display += intent + ': ' + count + ' | ';
+                    }
+                    display = display.replace(/ \| $/, '') + '</div>';
+                } else if (key === 'profile_confidence_score') {
+                    const score = parseFloat(value);
+                    const barColor = score >= 0.7 ? '#10b981' : score >= 0.4 ? '#f59e0b' : '#ef4444';
+                    display = '<div style="display:flex;align-items:center;gap:8px">'
+                        + '<div style="width:100px;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden">'
+                        + '<div style="width:' + (score*100) + '%;height:100%;background:' + barColor + ';border-radius:4px"></div>'
+                        + '</div>'
+                        + '<span>' + (score*100).toFixed(0) + '%</span></div>';
+                } else if (key === 'budget' && typeof value === 'object') {
+                    const min = value.min || 0;
+                    const max = value.max || 0;
+                    const unit = value.unit || 'UF';
+                    const conf = value.confidence ? ' (' + (value.confidence*100).toFixed(0) + '% conf)' : '';
+                    display = (min ? min + ' - ' : 'hasta ') + max.toLocaleString() + ' ' + unit + conf;
+                } else if (Array.isArray(value)) {
+                    display = value.join(', ');
+                } else if (typeof value === 'object') {
+                    display = JSON.stringify(value);
+                } else {
+                    display = String(value);
+                }
+                
                 html += '<dt>' + label + '</dt><dd>' + display + '</dd>';
             }
         } catch(e) {

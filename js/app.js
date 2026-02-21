@@ -340,8 +340,10 @@ const App = {
         // --- Property card ---
         const propertyCard = document.querySelector('.action-card[data-card-type="property"]');
         if (propertyCard) {
-            const locations = profile.locations || [];
-            const types = profile.property_types || [];
+            // v2 compat: extract names from weighted objects or flat strings
+            const extractNames = (arr) => (arr || []).map(i => typeof i === 'string' ? i : (i.name || '')).filter(Boolean);
+            const locations = extractNames(profile.locations);
+            const types = extractNames(profile.property_types);
             const budget = profile.budget || {};
             
             if (locations.length > 0 || types.length > 0) {

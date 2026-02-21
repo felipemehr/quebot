@@ -119,19 +119,64 @@ function buildProfileContext(?array $profile): string {
 
     $lines = [];
 
+    // === Locations (v2: weighted objects, v1: flat strings) ===
     $locs = $profile['locations'] ?? [];
     if (!empty($locs)) {
-        if (count($locs) === 1) {
-            $lines[] = "- Zona principal de interés: " . $locs[0];
+        $locNames = [];
+        $isWeighted = (isset($locs[0]) && is_array($locs[0]) && isset($locs[0]['name']));
+        
+        if ($isWeighted) {
+            // v2 format — sort by confidence, show primary vs secondary
+            usort($locs, fn($a, $b) => ($b['confidence'] ?? 0) <=> ($a['confidence'] ?? 0));
+            $primary = [];
+            $secondary = [];
+            foreach ($locs as $loc) {
+                $conf = $loc['confidence'] ?? 0;
+                $name = $loc['name'] ?? '';
+                if ($name === '') continue;
+                if ($conf >= 0.5) {
+                    $primary[] = $name;
+                } else {
+                    $secondary[] = $name;
+                }
+            }
+            
+            if (count($primary) === 1 && empty($secondary)) {
+                $lines[] = "- Zona principal de interés: " . $primary[0];
+            } elseif (!empty($primary)) {
+                $lines[] = "- Zonas principales: " . implode(', ', $primary);
+                if (!empty($secondary)) {
+                    $lines[] = "  (también ha consultado: " . implode(', ', $secondary) . " — baja confianza)";
+                }
+                if (count($primary) > 1) {
+                    $lines[] = "  ⚠️ Si el usuario dice 'mi zona' sin especificar, PREGUNTA cuál de estas ubicaciones: " . implode(', ', $primary);
+                }
+            } elseif (!empty($secondary)) {
+                $lines[] = "- Zonas consultadas (baja confianza): " . implode(', ', $secondary);
+                $lines[] = "  ⚠️ Confirma la ubicación antes de buscar.";
+            }
         } else {
-            $lines[] = "- Zona principal: " . $locs[0] . " (también ha consultado: " . implode(', ', array_slice($locs, 1)) . ")";
-            $lines[] = "  ⚠️ Si el usuario dice 'mi zona' o 'donde me interesa' sin especificar, PREGUNTA cuál ubicación prefiere. NO asumas una.";
+            // v1 legacy format — flat strings
+            if (count($locs) === 1) {
+                $lines[] = "- Zona principal de interés: " . $locs[0];
+            } else {
+                $lines[] = "- Zona principal: " . $locs[0] . " (también ha consultado: " . implode(', ', array_slice($locs, 1)) . ")";
+                $lines[] = "  ⚠️ Si el usuario dice 'mi zona' o 'donde me interesa' sin especificar, PREGUNTA cuál ubicación prefiere. NO asumas una.";
+            }
         }
     }
 
+    // === Property types (v2: weighted, v1: flat) ===
     $types = $profile['property_types'] ?? [];
     if (!empty($types)) {
-        $lines[] = "- Busca: " . implode(', ', $types);
+        $typeNames = [];
+        foreach ($types as $t) {
+            if (is_string($t)) $typeNames[] = $t;
+            elseif (is_array($t) && isset($t['name'])) $typeNames[] = $t['name'];
+        }
+        if (!empty($typeNames)) {
+            $lines[] = "- Busca: " . implode(', ', $typeNames);
+        }
     }
 
     $bed = $profile['bedrooms'] ?? null;
@@ -179,12 +224,43 @@ function buildProfileContext(?array $profile): string {
 
     $reqs = $profile['key_requirements'] ?? [];
     if (!empty($reqs)) {
-        $lines[] = "- Necesidades: " . implode(', ', $reqs);
+        $reqNames = [];
+        foreach ($reqs as $r) {
+            if (is_string($r)) $reqNames[] = $r;
+            elseif (is_array($r) && isset($r['name'])) $reqNames[] = $r['name'];
+        }
+        if (!empty($reqNames)) {
+            $lines[] = "- Necesidades: " . implode(', ', $reqNames);
+        }
     }
 
     $exp = $profile['experience'] ?? null;
     if ($exp) {
         $lines[] = "- Experiencia: {$exp}";
+    }
+
+    // === Behavioral signals ===
+    $signals = $profile['behavioral_signals'] ?? [];
+    if (!empty($signals['dominant_intent']) && $signals['dominant_intent'] !== 'general') {
+        $intent = $signals['dominant_intent'];
+        $pct = $signals['dominant_pct'] ?? 0;
+        if ($pct > 60) {
+            $intentMap = [
+                'property_search' => 'búsqueda inmobiliaria',
+                'legal' => 'consultas legales',
+                'news' => 'noticias y actualidad',
+                'financial' => 'consultas financieras',
+                'retail' => 'compras y retail'
+            ];
+            $lines[] = "- Interés dominante: " . ($intentMap[$intent] ?? $intent) . " ({$pct}% de sus consultas)";
+        }
+    }
+
+    // === Profile confidence ===
+    $confScore = $profile['profile_confidence_score'] ?? null;
+    if ($confScore !== null) {
+        $confLabel = $confScore >= 0.8 ? 'Alto' : ($confScore >= 0.5 ? 'Medio' : 'Bajo');
+        $lines[] = "- Confianza del perfil: {$confLabel} ({$confScore})";
     }
 
     if (empty($lines)) return '';
