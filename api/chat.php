@@ -588,6 +588,7 @@ if ($shouldSearch) {
         }
     } catch (\Throwable $e) {
         error_log("SearchOrchestrator error: " . $e->getMessage());
+        emitSSE('step', ['stage' => 'search_error', 'detail' => 'Error búsqueda: ' . substr($e->getMessage(), 0, 200)]);
         $detectedVertical = $vertical ?? 'unknown';
         $searchVertical = $detectedVertical; // Preserve for done event tracking
         if ($detectedVertical === 'real_estate') {
