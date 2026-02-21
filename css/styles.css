@@ -258,17 +258,17 @@ textarea {
 .history-items {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 0;
 }
 
 .history-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
+    gap: 8px;
+    padding: 7px 10px;
     border-radius: var(--radius-md);
     color: var(--text-secondary);
-    font-size: 0.79rem;
+    font-size: 0.71rem;
     transition: all var(--transition-fast);
     cursor: pointer;
     text-align: left;
@@ -1680,7 +1680,29 @@ textarea {
         position: fixed;
         transform: translateX(0);
     }
+
+    /* Preview close: larger touch target on mobile */
+    .close-preview {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
     
+
+    /* Auth modal: ensure centered on mobile */
+    .auth-modal {
+        padding: 16px;
+    }
+    
+    .auth-modal-content {
+        max-width: 320px;
+    }
+
     /* Toast notifications */
     .toast-container {
         bottom: 80px;
