@@ -33,6 +33,8 @@ class SearchOrchestrator {
     private SearchCache $cache;
     private ?string $claudeApiKey;
     private bool $llmRerankEnabled;
+    /** @var callable|null SSE progress callback */
+    private $progressCallback = null;
 
     /** Minimum valid listings before declaring "insufficient offer" */
     private const MIN_VALID_LISTINGS = 2;
@@ -40,7 +42,8 @@ class SearchOrchestrator {
     /** Maximum queries to send in parallel (SerpAPI budget) */
     private const MAX_PARALLEL_QUERIES = 8;
 
-    public function __construct(?string $claudeApiKey = null, bool $llmRerankEnabled = false) {
+    public function __construct(?string $claudeApiKey = null, bool $llmRerankEnabled = false, ?callable $progressCallback = null) {
+        $this->progressCallback = $progressCallback;
         $this->cache = new SearchCache();
         $this->claudeApiKey = $claudeApiKey;
         $this->llmRerankEnabled = $llmRerankEnabled;
@@ -53,6 +56,13 @@ class SearchOrchestrator {
             if ($serpProvider->isAvailable()) {
                 $this->registerProvider($serpProvider);
             }
+        }
+    }
+
+    /** Emit progress step if callback is set */
+    private function emitProgress(string $stage, string $detail): void {
+        if ($this->progressCallback) {
+            ($this->progressCallback)($stage, $detail);
         }
     }
 
@@ -89,6 +99,11 @@ class SearchOrchestrator {
         $intent = $queryData['intent'] ?? null;
         $contextQueries = $queryData['context_queries'] ?? [];
 
+        // SSE: Emit intent parsed
+        $intentSummary = $this->summarizeIntent($intent, $vertical);
+        $this->emitProgress('intent_parsed', $intentSummary);
+        $this->emitProgress('queries_built', count($queries) . ' búsquedas + ' . count($contextQueries) . ' contextuales');
+
         // Step 2: Cache check
         $cacheKey = $queries[0] ?? $cleanedQuery;
         $cached = $this->cache->get($vertical, $cacheKey);
@@ -103,6 +118,7 @@ class SearchOrchestrator {
         $providerName = $provider->getName();
 
         $searchQueries = array_slice($queries, 0, self::MAX_PARALLEL_QUERIES);
+        $this->emitProgress('searching', 'Consultando Google (' . count($searchQueries) . ' búsquedas paralelas)...');
 
         $allResults = [];
         if (method_exists($provider, 'searchParallel')) {
@@ -138,6 +154,8 @@ class SearchOrchestrator {
             }
         }
 
+        $this->emitProgress('search_done', count($allResults) . ' resultados de ' . $providerName);
+
         // Step 3.5: Run context queries in parallel
         $contextResults = [];
         if (!empty($contextQueries) && $vertical === 'real_estate') {
@@ -162,6 +180,9 @@ class SearchOrchestrator {
                 }
             }
             $contextResults = array_slice($contextResults, 0, 8);
+            if (!empty($contextResults)) {
+                $this->emitProgress('context_done', count($contextResults) . ' datos de contexto urbano obtenidos');
+            }
         }
 
         // Step 4: Validate + extract structured data
@@ -171,6 +192,7 @@ class SearchOrchestrator {
         $ranked = HeuristicRanker::rank($validated, $cleanedQuery, $vertical, $intent ?? []);
 
         // Step 6: Scrape top results for enrichment
+        $this->emitProgress('scraping', 'Extrayendo datos de publicaciones...');
         $scraped = 0;
         foreach ($ranked as &$r) {
             if ($scraped >= $scrapePages) break;
@@ -199,6 +221,8 @@ class SearchOrchestrator {
         }
         unset($r);
 
+        $this->emitProgress('scrape_done', $scraped . ' páginas extraídas');
+
         // Step 7: Re-rank after scraping
         $ranked = HeuristicRanker::rank($ranked, $cleanedQuery, $vertical, $intent ?? []);
 
@@ -214,7 +238,12 @@ class SearchOrchestrator {
         // Step 8: Resolve zones (for real estate with zone qualifier)
         $resolvedZones = [];
         if ($vertical === 'real_estate' && $intent && !empty($intent['zona_texto'])) {
+            $this->emitProgress('geo_resolving', 'Resolviendo zonas: "' . ($intent['zona_texto'] ?? '') . '"...');
             $resolvedZones = GeoResolver::resolve($intent, $contextResults);
+            $sectors = $resolvedZones['sectors'] ?? [];
+            if (!empty($sectors)) {
+                $this->emitProgress('geo_resolved', 'Zona → ' . implode(', ', array_slice($sectors, 0, 4)));
+            }
         }
 
         // Step 9: Strict candidate filtering
@@ -222,6 +251,7 @@ class SearchOrchestrator {
         $filteredForLLM = $ranked;  // Default: use all ranked results
 
         if ($vertical === 'real_estate' && $intent) {
+            $this->emitProgress('validating', 'Validando ' . count($ranked) . ' candidatos (precio, zona, coherencia)...');
             $filterResult = CandidateValidator::filter($ranked, $intent, $resolvedZones);
 
             // Use passed + soft_failed for Claude (hard_failed excluded)
@@ -229,6 +259,10 @@ class SearchOrchestrator {
                 $filterResult['passed'],
                 $filterResult['soft_failed']
             );
+            $passedCount = count($filterResult['passed']);
+            $softCount = count($filterResult['soft_failed']);
+            $hardCount = count($filterResult['hard_failed']);
+            $this->emitProgress('validated', "{$passedCount} pasan, {$softCount} parciales, {$hardCount} descartados");
         }
 
         // Step 10: Count valid listings
@@ -648,6 +682,22 @@ class SearchOrchestrator {
         }
 
         $ctx .= "\n";
+    }
+
+    /** Build a human-readable intent summary for SSE progress */
+    private function summarizeIntent(?array $intent, string $vertical): string {
+        if (!$intent) return 'Consulta ' . $vertical;
+        $parts = [];
+        $tipo = $intent['tipo_propiedad'] ?? null;
+        if ($tipo) $parts[] = $tipo;
+        $ubicacion = $intent['ubicacion'] ?? null;
+        if ($ubicacion) $parts[] = 'en ' . $ubicacion;
+        $zona = $intent['zona_texto'] ?? null;
+        if ($zona && $zona !== $ubicacion) $parts[] = '(' . $zona . ')';
+        $pMax = $intent['presupuesto']['max'] ?? null;
+        $pUnit = $intent['presupuesto']['moneda'] ?? 'UF';
+        if ($pMax) $parts[] = 'hasta ' . number_format($pMax, 0, ',', '.') . ' ' . $pUnit;
+        return !empty($parts) ? 'Detectado: ' . implode(' ', $parts) : 'Analizando búsqueda...';
     }
 
     private function cleanResultsForOutput(array $results): array {

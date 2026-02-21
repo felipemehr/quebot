@@ -1,12 +1,13 @@
 <?php
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/sse.php';
 require_once __DIR__ . '/search.php';
 require_once __DIR__ . '/../services/legal/LegalSearch.php';
 require_once __DIR__ . '/../services/ProfileBuilder.php';
 require_once __DIR__ . '/../services/FirestoreAudit.php';
 require_once __DIR__ . '/../services/ResponseVerifier.php';
 
-header('Content-Type: application/json; charset=utf-8');
+// Content-Type set per request method (SSE for POST, JSON for GET/OPTIONS)
 
 // === CORS VALIDATION ===
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
@@ -23,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 // Status check endpoint (GET)
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['status'])) {
+    header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'configured' => !empty(CLAUDE_API_KEY),
         'status' => 'ok'
@@ -32,6 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['status'])) {
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
+    header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['error' => 'Method not allowed']);
     exit;
 }
@@ -74,9 +77,13 @@ $clientIp = trim(explode(',', $clientIp)[0]);
 
 if (!checkRateLimit($clientIp)) {
     http_response_code(429);
+    header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['error' => 'Rate limit exceeded. Max ' . RATE_LIMIT_PER_MINUTE . ' requests per minute.']);
     exit;
 }
+
+// === INIT SSE STREAMING ===
+initSSE();
 
 // === START TIMING ===
 $startTime = microtime(true);
@@ -93,8 +100,7 @@ $userProfile = $input['user_profile'] ?? null;
 $caseId = $input['caseId'] ?? null;
 
 if (empty($message)) {
-    http_response_code(400);
-    echo json_encode(['error' => 'Message is required']);
+    emitSSE('error', ['message' => 'Message is required']);
     exit;
 }
 
@@ -400,6 +406,10 @@ if (!$isFollowUp && !$isTypo && $messageWords >= 2) {
     }
 }
 
+if (!$shouldSearch) {
+    emitSSE('step', ['stage' => 'thinking', 'detail' => 'Procesando tu mensaje...']);
+}
+
 // --- Get UF value ---
 $ufData = getUFValue();
 $ufContext = '';
@@ -424,7 +434,11 @@ $ragStartTime = microtime(true);
 
 if ($shouldSearch) {
     try {
-        $orchestrator = new SearchOrchestrator(CLAUDE_API_KEY, false);
+        // SSE: pass progress callback for real-time pipeline steps
+        $sseProgress = function(string $stage, string $detail) {
+            emitSSE('step', ['stage' => $stage, 'detail' => $detail]);
+        };
+        $orchestrator = new SearchOrchestrator(CLAUDE_API_KEY, false, $sseProgress);
 
         $vertical = DomainPolicy::detectVertical($searchQuery);
         $isPropertyQuery = ($vertical === 'real_estate');
@@ -498,6 +512,7 @@ if ($shouldSearch) {
 }
 
 // --- Legal library search (PostgreSQL RAG) ---
+emitSSE('step', ['stage' => 'legal_search', 'detail' => 'Consultando base legal (5.344 artículos)...']);
 $legalContext = '';
 try {
     $rawLegal = LegalSearch::buildContext($message);
@@ -538,99 +553,73 @@ $messages[] = [
 ];
 
 // --- Call LLM API (Claude primary, OpenAI fallback) ---
+emitSSE('step', ['stage' => 'generating', 'detail' => 'Generando respuesta con Claude...']);
 $llmStartTime = microtime(true);
 $modelUsed = MODEL;
 $usedFallback = false;
 
 $apiData = [
     'model' => $modelUsed,
-        'fallback_used' => $usedFallback,
     'max_tokens' => MAX_TOKENS,
     'system' => sanitizeUtf8($systemPrompt),
     'messages' => $messages
 ];
 
-$jsonPayload = json_encode($apiData, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
-if ($jsonPayload === false) {
-    error_log("json_encode failed: " . json_last_error_msg());
-    http_response_code(500);
-    echo json_encode(['error' => 'Internal encoding error']);
-    exit;
-}
-
-// Attempt Claude with 1 retry
+// === STREAMING LLM CALL ===
 $claudeSuccess = false;
-$data = null;
 $reply = null;
+$data = ['usage' => ['input_tokens' => 0, 'output_tokens' => 0]];
+$tokenCallback = function(string $token) {
+    emitSSE('token', ['t' => $token]);
+};
 
+// Attempt Claude with streaming (1 retry)
 for ($attempt = 1; $attempt <= 2; $attempt++) {
-    $ch = curl_init('https://api.anthropic.com/v1/messages');
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => [
-            'Content-Type: application/json',
-            'x-api-key: ' . CLAUDE_API_KEY,
-            'anthropic-version: 2023-06-01'
-        ],
-        CURLOPT_POSTFIELDS => $jsonPayload,
-        CURLOPT_TIMEOUT => 60
-    ]);
-
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if ($httpCode === 200) {
-        $data = json_decode($response, true);
-        $reply = $data['content'][0]['text'] ?? null;
-        if ($reply) {
-            $claudeSuccess = true;
-            break;
-        }
+    $result = streamClaude(CLAUDE_API_KEY, $apiData, $tokenCallback);
+    
+    if ($result['success']) {
+        $reply = $result['reply'];
+        $data['usage'] = $result['usage'];
+        $claudeSuccess = true;
+        break;
     }
     
-    // Check if retryable error
-    $errorData = json_decode($response, true);
-    $errorType = $errorData['error']['type'] ?? '';
-    $isRetryable = in_array($errorType, ['overloaded_error', 'rate_limit_error']) 
-                   || in_array($httpCode, [429, 500, 502, 503, 529]);
-    
+    $httpCode = $result['httpCode'] ?? 0;
+    $isRetryable = in_array($httpCode, [429, 500, 502, 503, 529]);
     if (!$isRetryable) break;
     
     if ($attempt === 1) {
-        error_log("Claude attempt {$attempt} failed ({$errorType} / HTTP {$httpCode}), retrying in 2s...");
+        error_log("Claude stream attempt {$attempt} failed (HTTP {$httpCode}), retrying in 2s...");
+        emitSSE('step', ['stage' => 'retry', 'detail' => 'Claude no disponible, reintentando...']);
         sleep(2);
     }
 }
 
-// If Claude failed, try OpenAI fallback
+// If Claude failed, try OpenAI streaming fallback
 if (!$claudeSuccess) {
-    error_log("Claude failed after retries. Attempting OpenAI fallback...");
+    error_log("Claude streaming failed. Attempting OpenAI streaming fallback...");
+    emitSSE('step', ['stage' => 'fallback', 'detail' => 'Cambiando a modelo alternativo (GPT-4o-mini)...']);
     
-    $fallbackResult = callOpenAIFallback(
+    $result = streamOpenAI(
+        OPENAI_API_KEY,
+        OPENAI_MODEL,
         sanitizeUtf8($systemPrompt),
         $messages,
-        MAX_TOKENS
+        MAX_TOKENS,
+        $tokenCallback
     );
     
-    if ($fallbackResult['success']) {
-        $reply = $fallbackResult['reply'];
-        $modelUsed = $fallbackResult['model'];
+    if ($result['success']) {
+        $reply = $result['reply'];
+        $modelUsed = $result['model'];
         $usedFallback = true;
-        $data = [
-            'usage' => $fallbackResult['usage']
-        ];
-        error_log("OpenAI fallback succeeded: " . $fallbackResult['model']);
+        $data['usage'] = $result['usage'];
+        error_log("OpenAI streaming fallback succeeded");
     } else {
         // Both failed
         $llmEndTime = microtime(true);
-        error_log("Both Claude and OpenAI failed. OpenAI: " . ($fallbackResult['error'] ?? 'unknown'));
-        http_response_code(500);
-        echo json_encode([
-            'error' => 'API error', 
-            'details' => 'Claude y OpenAI no disponibles temporalmente. Intenta en unos minutos.'
-        ]);
+        error_log("Both Claude and OpenAI streaming failed.");
+        emitSSE('error', ['message' => 'Claude y OpenAI no disponibles temporalmente. Intenta en unos minutos.']);
         exit;
     }
 }
@@ -638,6 +627,7 @@ if (!$claudeSuccess) {
 $llmEndTime = microtime(true);
 
 // === RESPONSE VERIFIER — Pre-delivery quality gate ===
+emitSSE('step', ['stage' => 'verifying', 'detail' => 'Control de calidad: verificando precisión...']);
 $verifierResult = null;
 $verifierTimingMs = 0;
 if ($shouldSearch && !empty($searchValidURLs)) {
@@ -672,6 +662,7 @@ if ($shouldSearch && !empty($searchValidURLs)) {
 }
 
 // === POST-PROCESS: VALIDATE URLs IN RESPONSE ===
+emitSSE('step', ['stage' => 'url_check', 'detail' => 'Validando enlaces...']);
 $fabricatedCount = 0;
 if ($shouldSearch && !empty($searchValidURLs)) {
     $validation = validateResponseURLs($reply, $searchValidURLs);
@@ -734,8 +725,11 @@ if ($usedFallback) {
     $costEstimate = ($inputTokens * 3 / 1000000) + ($outputTokens * 15 / 1000000);
 }
 
-echo json_encode([
-    'response' => $reply,
+// Emit final response text (for clients that don't accumulate tokens)
+emitSSE('response', ['text' => $reply]);
+
+// Emit done with all metadata
+emitSSE('done', [
     'searched' => $shouldSearch,
     'searchQuery' => $shouldSearch ? $searchQuery : null,
     'searchVertical' => $searchVertical,
@@ -761,5 +755,5 @@ echo json_encode([
     ],
     'search_intent' => $searchIntent,
     'profile_update' => $profileUpdate
-], JSON_UNESCAPED_UNICODE);
+]);
 ?>
