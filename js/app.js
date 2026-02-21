@@ -110,7 +110,7 @@ const App = {
         UI.elements.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
 
         // Suggestion cards
-        document.querySelectorAll('.suggestion-card').forEach(card => {
+        document.querySelectorAll('.action-card').forEach(card => {
             card.addEventListener('click', () => {
                 const prompt = card.dataset.prompt;
                 UI.elements.messageInput.value = prompt;
@@ -118,6 +118,9 @@ const App = {
                 this.sendMessage();
             });
         });
+
+        // B3: Personalize action cards with user profile
+        this.personalizeActionCards();
 
         // Chat history clicks
         UI.elements.chatHistory.addEventListener('click', (e) => {
@@ -217,7 +220,7 @@ const App = {
      * Eliminar conversación
      */
     deleteChat(chatId) {
-        if (confirm('¿Eliminar esta conversación?')) {
+        if (confirm('¿Eliminar este caso?')) {
             Storage.deleteChat(chatId);
             
             // Also delete from Firestore
@@ -247,7 +250,7 @@ const App = {
             UI.setChatTitle(chat.title);
             UI.renderMessages(chat.messages);
         } else {
-            UI.setChatTitle('Nueva conversación');
+            UI.setChatTitle('Nueva Misión');
             UI.renderMessages([]);
         }
     },
@@ -258,11 +261,134 @@ const App = {
     renderChatHistory() {
         const chats = Storage.getChats();
         UI.renderChatHistory(chats, this.currentChatId);
+        this.updateRecentCases(chats);
     },
+
+    /**
+     * Actualizar casos recientes en dashboard
+     */
+    updateRecentCases(chats) {
+        const grid = document.getElementById('recentCasesGrid');
+        const section = document.getElementById('recentCasesSection');
+        if (!grid || !section) return;
+
+        // Filter chats that have messages
+        const activeCases = (chats || Storage.getChats())
+            .filter(c => c.messages && c.messages.length > 0)
+            .slice(0, 3);
+
+        if (activeCases.length === 0) {
+            grid.innerHTML = '<p class="no-cases-msg">Aún no tienes casos activos.</p>';
+            return;
+        }
+
+        grid.innerHTML = activeCases.map(chat => {
+            const lastMsg = chat.messages[chat.messages.length - 1];
+            const preview = lastMsg ? lastMsg.content.substring(0, 80) + (lastMsg.content.length > 80 ? '...' : '') : '';
+            const date = chat.updatedAt ? new Date(chat.updatedAt).toLocaleDateString('es-CL', { day: 'numeric', month: 'short' }) : '';
+            const status = chat.messages.length > 0 ? 'Activo' : 'Nuevo';
+            
+            return `
+                <div class="case-card" data-chat-id="${chat.id}">
+                    <div class="case-card-title">${this.escapeHtml(chat.title)}</div>
+                    <div class="case-card-preview">${this.escapeHtml(preview)}</div>
+                    <div class="case-card-meta">
+                        <span>${date}</span>
+                        <span class="case-card-status">${status}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Click handlers
+        grid.querySelectorAll('.case-card').forEach(card => {
+            card.addEventListener('click', () => {
+                this.loadChat(card.dataset.chatId);
+            });
+        });
+    },
+
+    /**
+     * Escape HTML
+     */
+    escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    },
+
 
     /**
      * Enviar mensaje
      */
+
+    /**
+     * B3: Personalize action cards based on user's search profile.
+     * Called on init and when profile updates.
+     */
+    personalizeActionCards() {
+        const profile = (typeof queBotAuth !== 'undefined') ? queBotAuth.getSearchProfile() : null;
+        if (!profile) return;
+
+        // --- Property card ---
+        const propertyCard = document.querySelector('.action-card[data-card-type="property"]');
+        if (propertyCard) {
+            const locations = profile.locations || [];
+            const types = profile.property_types || [];
+            const budget = profile.budget || {};
+            
+            if (locations.length > 0 || types.length > 0) {
+                // Build personalized prompt
+                const parts = [];
+                if (types.length > 0) {
+                    parts.push(types.slice(0, 2).join(' o '));
+                } else {
+                    parts.push('propiedades');
+                }
+                if (locations.length > 0) {
+                    parts.push('en ' + locations.slice(0, 2).join(' y '));
+                }
+                
+                let prompt = 'Busca ' + parts.join(' ');
+                
+                // Add budget hint if available
+                if (budget.max) {
+                    const unit = budget.unit || 'UF';
+                    prompt += ' hasta ' + budget.max.toLocaleString('es-CL') + ' ' + unit;
+                }
+
+                // Update card
+                propertyCard.dataset.prompt = prompt;
+                const label = propertyCard.querySelector('.action-card-label');
+                if (label) {
+                    // Short label for the card
+                    let shortLabel = '';
+                    if (types.length > 0) {
+                        const typeNames = {
+                            'parcela': 'Parcelas',
+                            'casa': 'Casas',
+                            'departamento': 'Deptos',
+                            'terreno': 'Terrenos',
+                            'oficina': 'Oficinas'
+                        };
+                        shortLabel = types.map(t => typeNames[t] || t).slice(0, 2).join(' y ');
+                    } else {
+                        shortLabel = 'Propiedades';
+                    }
+                    if (locations.length > 0) {
+                        shortLabel += ' en ' + locations[0];
+                    }
+                    label.textContent = shortLabel;
+                }
+            }
+        }
+
+        // --- Prices card: could personalize with UF preferences ---
+        // (future: if profile shows interest in specific currencies)
+
+        // --- News card: could personalize with UF preferences ---
+        // (future: "Noticias inmobiliarias en Temuco")
+    },
+
     async sendMessage() {
         const content = UI.elements.messageInput.value.trim();
         if (!content || this.isProcessing) return;
@@ -307,8 +433,8 @@ const App = {
             }
         }
 
-        // Mostrar indicador de typing
-        UI.addTypingIndicator();
+        // Mostrar indicador de typing contextual
+        UI.addTypingIndicator(content);
 
         // Preparar mensajes para la API
         const messagesForApi = chat.messages.slice(-20);
@@ -384,6 +510,13 @@ const App = {
         
         // Save assistant message
         await queBotAuth.saveMessageToCase(this.currentChatId, 'assistant', assistantContent);
+
+                // Save search profile if backend extracted new preferences
+                if (metadata && metadata.profile_update) {
+                    queBotAuth.saveSearchProfile(metadata.profile_update);
+                    this.personalizeActionCards();
+                }
+
         
         // Log run with metadata (timing, tokens, cost)
         if (metadata && Object.keys(metadata).length > 0) {
