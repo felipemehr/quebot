@@ -1,5 +1,21 @@
 <?php
-// search.php - Web search via DuckDuckGo HTML + UF value from SII.cl
+/**
+ * search.php — Search library + JSON API endpoint.
+ *
+ * When accessed via HTTP GET with ?q= parameter, returns JSON results via SearchOrchestrator.
+ * When included via require_once, provides backward-compatible functions.
+ *
+ * API Usage:
+ *   GET /api/search.php?q=parcelas+melipeuco&vertical=real_estate
+ *   GET /api/search.php?q=ley+19628&vertical=legal
+ */
+
+// --- Load Orchestrator ---
+require_once __DIR__ . '/../services/search/SearchOrchestrator.php';
+
+// ================================================================
+// BACKWARD-COMPATIBLE FUNCTIONS (used by chat.php legacy flow)
+// ================================================================
 
 function getUFValue() {
     $year = date('Y');
@@ -18,7 +34,6 @@ function getUFValue() {
     $html = @file_get_contents($url, false, $ctx);
     if (!$html) return null;
     
-    // Month names in Spanish for section IDs
     $monthNames = [
         1 => 'enero', 2 => 'febrero', 3 => 'marzo', 4 => 'abril',
         5 => 'mayo', 6 => 'junio', 7 => 'julio', 8 => 'agosto',
@@ -27,18 +42,11 @@ function getUFValue() {
     
     $monthId = $monthNames[$month];
     
-    // Extract the month section
     $pattern = "/id='mes_{$monthId}'>(.*?)<\/div>\s*<\/div>/s";
     if (!preg_match($pattern, $html, $monthMatch)) return null;
     
     $monthHtml = $monthMatch[1];
     
-    // Table structure: each row has 3 pairs of (day, value)
-    // <th><strong>1</strong></th><td>39.703,50</td>
-    // <th><strong>11</strong></th><td>39.694,31</td>
-    // <th><strong>21</strong></th><td>39.750,94</td>
-    
-    // Extract all day-value pairs
     $values = [];
     preg_match_all('/<strong>(\d+)<\/strong><\/th>\s*<td[^>]*>([^<]*)<\/td>/s', $monthHtml, $matches, PREG_SET_ORDER);
     
@@ -50,10 +58,8 @@ function getUFValue() {
         }
     }
     
-    // Try today, then go backwards to find most recent value
     for ($d = $day; $d >= 1; $d--) {
         if (isset($values[$d])) {
-            // Convert "39.733,94" to float 39733.94
             $numStr = str_replace('.', '', $values[$d]);
             $numStr = str_replace(',', '.', $numStr);
             return [
@@ -65,7 +71,6 @@ function getUFValue() {
         }
     }
     
-    // If current month has no values yet, try previous month
     if ($month > 1) {
         $prevMonth = $monthNames[$month - 1];
         $pattern2 = "/id='mes_{$prevMonth}'>(.*?)<\/div>\s*<\/div>/s";
@@ -95,122 +100,114 @@ function getUFValue() {
     return null;
 }
 
+/** @deprecated Use Validator::classifyUrl() */
 function classifyUrl($url) {
-    $url_lower = strtolower($url);
-    
-    // Specific property patterns
-    $specificPatterns = [
-        '/\/(propiedad|property|listing|ficha|detalle|aviso)\//',
-        '/\/[A-Z0-9]{5,}\/?$/',
-        '/id=\d+/',
-        '/\d{6,}/',
-        '/-(casa|depto|departamento|parcela|terreno|sitio)-.*-\d+/',
-    ];
-    
-    foreach ($specificPatterns as $pattern) {
-        if (preg_match($pattern, $url_lower)) {
-            return 'specific';
-        }
-    }
-    
-    // Listing/portal patterns
-    $listingPatterns = [
-        '/\/(venta|arriendo|comprar|buscar|search|results|listings)\//',
-        '/\/(parcelas|casas|departamentos|terrenos|propiedades)\//',
-        '/category|region|comuna|sector/',
-    ];
-    
-    foreach ($listingPatterns as $pattern) {
-        if (preg_match($pattern, $url_lower)) {
-            return 'listing';
-        }
-    }
-    
-    return 'unknown';
+    return Validator::classifyUrl($url);
 }
 
+/** @deprecated Use QueryBuilder::build() */
+function cleanPropertyQuery(string $query): string {
+    $result = QueryBuilder::build($query, 'real_estate');
+    return $result['cleaned_query'];
+}
+
+/** @deprecated Use DomainPolicy::detectVertical() */
+function isPropertySearch(string $messageLower): bool {
+    return DomainPolicy::detectVertical($messageLower) === 'real_estate';
+}
+
+/** @deprecated Use QueryBuilder::build() */
+function generatePropertyQueries(string $cleanedQuery): array {
+    $result = QueryBuilder::build($cleanedQuery, 'real_estate');
+    return $result['queries'];
+}
+
+/** @deprecated Use DuckDuckGoHtmlProvider->search() */
 function searchDuckDuckGo($query, $numResults = 8) {
-    $url = 'https://html.duckduckgo.com/html/?q=' . urlencode($query);
-    
-    $ctx = stream_context_create([
-        'http' => [
-            'timeout' => 10,
-            'header' => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n"
-        ]
-    ]);
-    
-    $html = @file_get_contents($url, false, $ctx);
-    if (!$html) return [];
-    
-    $results = [];
-    
-    // Extract titles and URLs
-    preg_match_all('/class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/s', $html, $titleMatches, PREG_SET_ORDER);
-    
-    // Extract snippets  
-    preg_match_all('/class="result__snippet"[^>]*>(.*?)<\/a>/s', $html, $snippetMatches, PREG_SET_ORDER);
-    
-    $count = min(count($titleMatches), $numResults);
-    
-    for ($i = 0; $i < $count; $i++) {
-        $rawUrl = $titleMatches[$i][1];
-        $title = strip_tags($titleMatches[$i][2]);
-        
-        // DDG redirects - extract actual URL
-        if (preg_match('/uddg=([^&]+)/', $rawUrl, $urlMatch)) {
-            $rawUrl = urldecode($urlMatch[1]);
-        }
-        
-        $snippet = '';
-        if (isset($snippetMatches[$i])) {
-            $snippet = strip_tags($snippetMatches[$i][1]);
-            $snippet = html_entity_decode($snippet, ENT_QUOTES, 'UTF-8');
-            $snippet = preg_replace('/\s+/', ' ', trim($snippet));
-        }
-        
-        $type = classifyUrl($rawUrl);
-        
-        $results[] = [
-            'title' => html_entity_decode($title, ENT_QUOTES, 'UTF-8'),
-            'url' => $rawUrl,
-            'snippet' => $snippet,
-            'type' => $type
+    $provider = new DuckDuckGoHtmlProvider();
+    $results = $provider->search($query, $numResults);
+    return array_map(function($r) {
+        return [
+            'title' => $r['title'],
+            'url' => $r['url'],
+            'snippet' => $r['snippet'],
+            'type' => Validator::classifyUrl($r['url']),
         ];
-    }
-    
-    return $results;
+    }, $results);
 }
 
+/** @deprecated Use mergeSearchResults in Orchestrator */
+function mergeSearchResults(array ...$resultSets): array {
+    $merged = [];
+    $seenUrls = [];
+    foreach ($resultSets as $results) {
+        foreach ($results as $result) {
+            $normalizedUrl = rtrim($result['url'], '/');
+            if (!in_array($normalizedUrl, $seenUrls)) {
+                $merged[] = $result;
+                $seenUrls[] = $normalizedUrl;
+            }
+        }
+    }
+    return $merged;
+}
+
+/** @deprecated Use DuckDuckGoHtmlProvider->scrapeContent() */
 function scrapePageContent($url, $maxLength = 3000) {
-    $ctx = stream_context_create([
-        'http' => [
-            'timeout' => 8,
-            'header' => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n",
-            'follow_location' => true,
-            'max_redirects' => 3
-        ]
-    ]);
+    $provider = new DuckDuckGoHtmlProvider();
+    return $provider->scrapeContent($url, $maxLength);
+}
+
+
+// ================================================================
+// JSON API ENDPOINT (only when accessed directly via HTTP)
+// ================================================================
+
+if (php_sapi_name() !== 'cli' && isset($_GET['q'])) {
+    header('Content-Type: application/json; charset=utf-8');
     
-    $html = @file_get_contents($url, false, $ctx);
-    if (!$html) return null;
-    
-    // Remove scripts, styles, nav, header, footer
-    $html = preg_replace('/<script[^>]*>.*?<\/script>/si', '', $html);
-    $html = preg_replace('/<style[^>]*>.*?<\/style>/si', '', $html);
-    $html = preg_replace('/<nav[^>]*>.*?<\/nav>/si', '', $html);
-    $html = preg_replace('/<header[^>]*>.*?<\/header>/si', '', $html);
-    $html = preg_replace('/<footer[^>]*>.*?<\/footer>/si', '', $html);
-    
-    // Get text content
-    $text = strip_tags($html);
-    $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
-    $text = preg_replace('/\s+/', ' ', $text);
-    $text = trim($text);
-    
-    if (strlen($text) > $maxLength) {
-        $text = substr($text, 0, $maxLength) . '...';
+    // CORS
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+    $configPath = __DIR__ . '/config.php';
+    if (file_exists($configPath)) {
+        $config = require $configPath;
+        $allowed = $config['ALLOWED_ORIGINS'] ?? [];
+        if (in_array($origin, $allowed)) {
+            header("Access-Control-Allow-Origin: {$origin}");
+        }
     }
     
-    return $text;
+    $query = trim($_GET['q']);
+    $vertical = $_GET['vertical'] ?? 'auto';
+    
+    if (empty($query)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Missing q parameter'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    
+    $validVerticals = ['auto', 'real_estate', 'legal', 'news', 'retail', 'general'];
+    if (!in_array($vertical, $validVerticals)) {
+        $vertical = 'auto';
+    }
+    
+    try {
+        $apiKey = getenv('CLAUDE_API_KEY') ?: null;
+        $orchestrator = new SearchOrchestrator($apiKey, false);
+        
+        $result = $orchestrator->search($query, $vertical, [
+            'max_results' => 10,
+            'scrape_pages' => 5,
+            'scrape_max_length' => 5000,
+        ]);
+        
+        // Remove context_for_llm from API output (internal use only)
+        unset($result['context_for_llm']);
+        
+        echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    } catch (\Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Search failed', 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
 }
-?>
