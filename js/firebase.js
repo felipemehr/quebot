@@ -16,6 +16,20 @@ const USER_LEVEL = {
   FULL: 'full'
 };
 
+
+/**
+ * Detect current environment from hostname.
+ * Tags all Firestore writes so staging/production data doesn't mix.
+ */
+function getQueBotEnvironment() {
+  const host = window.location.hostname;
+  if (host.includes('quebot-production')) return 'production';
+  if (host.includes('spirited-purpose')) return 'staging';
+  if (host.includes('localhost') || host.includes('127.0.0.1')) return 'local';
+  if (host.includes('lab')) return 'lab';
+  return 'unknown';
+}
+
 class QueBotAuth {
   constructor() {
     this.app = null;
@@ -147,7 +161,7 @@ class QueBotAuth {
     if (!this.currentUser || !this.db) return;
     
     try {
-      this.userProfile = { ...this.userProfile, ...profile };
+      this.userProfile = { ...this.userProfile, ...profile, environment: getQueBotEnvironment() };
       await this.db.collection('users').doc(this.currentUser.uid).set(this.userProfile, { merge: true });
       console.log('Profile saved:', this.userProfile);
     } catch (error) {
@@ -167,7 +181,8 @@ class QueBotAuth {
         .collection('conversations').doc(conversationId).set({
           title: title,
           messages: messages,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
+          environment: getQueBotEnvironment()
         }, { merge: true });
       return true;
     } catch (error) {
@@ -300,7 +315,8 @@ class QueBotAuth {
         status: 'open',
         channel: 'web',
         created_at: firebase.firestore.FieldValue.serverTimestamp(),
-        title: title || 'Nueva Misión'
+        title: title || 'Nueva Misión',
+        environment: getQueBotEnvironment()
       }, { merge: true });
       this.caseMap[caseId] = true;
     } catch (error) {
@@ -317,7 +333,8 @@ class QueBotAuth {
         case_id: caseId,
         role: role,
         text: text,
-        created_at: firebase.firestore.FieldValue.serverTimestamp()
+        created_at: firebase.firestore.FieldValue.serverTimestamp(),
+        environment: getQueBotEnvironment()
       });
       return msgId;
     } catch (error) {
@@ -363,7 +380,8 @@ class QueBotAuth {
           search_valid_listings: metadata.search_valid_listings || 0,
           search_insufficient: metadata.search_insufficient || false
         },
-        created_at: firebase.firestore.FieldValue.serverTimestamp()
+        created_at: firebase.firestore.FieldValue.serverTimestamp(),
+        environment: getQueBotEnvironment()
       });
       return runId;
     } catch (error) {

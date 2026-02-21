@@ -49,6 +49,23 @@ $authenticated = isset($_SESSION['admin_auth']) && $_SESSION['admin_auth'] === t
         }
         .login-box button:hover { background: #2a4f7f; }
         
+
+        /* Environment filter */
+        .env-filter {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+            font-size: 13px; color: #666;
+        }
+        .env-filter label { font-weight: 500; }
+        .env-filter select {
+            padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px;
+            font-size: 13px; background: white; cursor: pointer;
+        }
+        .badge-production { background: #10b981; color: white; }
+        .badge-staging { background: #f59e0b; color: white; }
+        .badge-lab { background: #ef4444; color: white; }
+        .badge-local { background: #6366f1; color: white; }
+        .badge-unknown { background: #9ca3af; color: white; }
+
         /* Dashboard */
         .header {
             background: #1F3A5F; color: white; padding: 16px 24px;
@@ -154,6 +171,18 @@ $authenticated = isset($_SESSION['admin_auth']) && $_SESSION['admin_auth'] === t
 </div>
 
 <div class="content">
+    <div class="env-filter">
+        <label>Entorno:</label>
+        <select id="env-filter" onchange="applyEnvFilter()">
+            <option value="all">Todos</option>
+            <option value="production">🟢 Production</option>
+            <option value="staging">🟠 Staging</option>
+            <option value="lab">🔴 Lab</option>
+            <option value="local">🟣 Local</option>
+            <option value="unknown">⚪ Sin etiqueta</option>
+        </select>
+        <span id="env-count" style="color:#999; font-size: 12px;"></span>
+    </div>
     <div class="tabs">
         <button class="tab active" onclick="showTab('cases')">Casos</button>
         <button class="tab" onclick="showTab('users')">Usuarios</button>
@@ -181,6 +210,46 @@ const BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/
 
 let allData = { cases: [], users: [], messages: [], runs: [] };
 let currentTab = 'cases';
+
+let envFilter = 'all';
+
+function applyEnvFilter() {
+    envFilter = document.getElementById('env-filter').value;
+    updateStats();
+    renderTable();
+}
+
+function filterByEnv(data) {
+    if (envFilter === 'all') return data;
+    return data.filter(row => {
+        const env = row.environment || 'unknown';
+        return env === envFilter;
+    });
+}
+
+function updateStats() {
+    const fd = {
+        users: filterByEnv(allData.users),
+        cases: filterByEnv(allData.cases),
+        messages: filterByEnv(allData.messages),
+        runs: filterByEnv(allData.runs)
+    };
+    document.getElementById('stat-users').textContent = fd.users.length;
+    document.getElementById('stat-cases').textContent = fd.cases.length;
+    document.getElementById('stat-messages').textContent = fd.messages.length;
+    document.getElementById('stat-runs').textContent = fd.runs.length;
+    
+    const total = allData.cases.length + allData.users.length + allData.messages.length + allData.runs.length;
+    const filtered = fd.cases.length + fd.users.length + fd.messages.length + fd.runs.length;
+    const el = document.getElementById('env-count');
+    if (envFilter === 'all') {
+        el.textContent = '';
+    } else {
+        el.textContent = `(${filtered} de ${total} registros)`;
+    }
+}
+
+
 
 // Firestore value parser
 function parseVal(v) {
@@ -227,11 +296,7 @@ async function loadAll() {
     ]);
     allData = { cases, users, messages, runs };
     
-    document.getElementById('stat-users').textContent = users.length;
-    document.getElementById('stat-cases').textContent = cases.length;
-    document.getElementById('stat-messages').textContent = messages.length;
-    document.getElementById('stat-runs').textContent = runs.length;
-    
+    updateStats();
     renderTable();
 }
 
@@ -243,7 +308,7 @@ function showTab(tab) {
 }
 
 function renderTable() {
-    const data = allData[currentTab];
+    const data = filterByEnv(allData[currentTab]);
     const container = document.getElementById('table-container');
     
     if (!data || data.length === 0) {
@@ -261,16 +326,16 @@ function renderTable() {
     let cols;
     switch(currentTab) {
         case 'cases':
-            cols = ['id', 'user_id', 'status', 'channel', 'vertical', 'created_at', 'messages'];
+            cols = ['id', 'user_id', 'status', 'channel', 'vertical', 'environment', 'created_at', 'messages'];
             break;
         case 'users':
-            cols = ['id', 'tipo', 'display_name', 'email', 'last_seen_at', 'casos', 'perfil'];
+            cols = ['id', 'tipo', 'display_name', 'email', 'environment', 'last_seen_at', 'casos', 'perfil'];
             break;
         case 'messages':
-            cols = ['id', 'case_id', 'role', 'text', 'created_at'];
+            cols = ['id', 'case_id', 'role', 'text', 'environment', 'created_at'];
             break;
         case 'runs':
-            cols = ['id', 'case_id', 'provider', 'model', 'tokens', 'timing', 'cost_estimate', 'flags', 'created_at'];
+            cols = ['id', 'case_id', 'provider', 'model', 'tokens', 'timing', 'cost_estimate', 'flags', 'environment', 'created_at'];
             break;
     }
     
@@ -355,6 +420,11 @@ function renderTable() {
                 val = badges.length ? badges.join(' ') : '-';
             } else if (c === 'cost_estimate' && currentTab === 'runs') {
                 val = row.cost_estimate && row.cost_estimate > 0 ? '$' + Number(row.cost_estimate).toFixed(4) : '-';
+
+            } else if (c === 'environment') {
+                const env = val || 'unknown';
+                const envClass = 'badge-' + env;
+                val = '<span class="badge ' + envClass + '">' + env + '</span>';
             } else if (c === 'id' && typeof val === 'string' && val.length > 12) {
                 val = val.substring(0, 12) + '...';
             } else if (c === 'user_id' && typeof val === 'string' && val.length > 12) {

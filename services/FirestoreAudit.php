@@ -180,6 +180,9 @@ class FirestoreAudit {
     private static function createDocument(string $collection, string $docId, array $fields): bool {
         $url = self::BASE_URL . "/{$collection}?documentId={$docId}";
 
+        // Auto-inject environment into every document
+        $fields['environment'] = self::stringVal(self::getEnvironment());
+
         $body = json_encode(['fields' => $fields], JSON_UNESCAPED_UNICODE);
 
         $ch = curl_init($url);
@@ -205,6 +208,9 @@ class FirestoreAudit {
     }
 
     private static function updateDocument(string $collection, string $docId, array $fields): bool {
+        // Auto-inject environment into every update
+        $fields['environment'] = self::stringVal(self::getEnvironment());
+
         $updateMasks = array_map(fn($k) => "updateMask.fieldPaths={$k}", array_keys($fields));
         $maskQuery = implode('&', $updateMasks);
 
@@ -232,6 +238,33 @@ class FirestoreAudit {
         }
 
         return true;
+    }
+
+
+    // ===== ENVIRONMENT DETECTION =====
+
+    /**
+     * Detect current environment from server hostname.
+     * Used to tag all Firestore writes so staging/production data doesn't mix.
+     */
+    private static function getEnvironment(): string {
+        $host = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'unknown');
+        
+        if (strpos($host, 'quebot-production') !== false) {
+            return 'production';
+        } elseif (strpos($host, 'spirited-purpose') !== false) {
+            return 'staging';
+        } elseif (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+            return 'local';
+        } elseif (strpos($host, 'lab') !== false) {
+            return 'lab';
+        }
+        
+        // Check RAILWAY_ENVIRONMENT or similar env vars as fallback
+        $railwayEnv = getenv('RAILWAY_ENVIRONMENT');
+        if ($railwayEnv) return strtolower($railwayEnv);
+        
+        return 'unknown';
     }
 
     // ===== VALUE FORMATTERS =====
