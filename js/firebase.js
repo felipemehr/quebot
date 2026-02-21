@@ -307,13 +307,43 @@ class QueBotAuth {
     }
   }
 
-  async logRun(runData) {
+  async logRun(caseId, messageId, metadata) {
     if (!this.currentUser || !this.db) return null;
     try {
       const runId = 'run_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
       await this.db.collection('runs').doc(runId).set({
         run_id: runId,
-        ...runData,
+        case_id: caseId || '',
+        trigger_message_id: messageId || '',
+        user_id: this.currentUser.uid || '',
+        provider: metadata.fallback_used ? 'openai' : 'anthropic',
+        models: {
+          reasoner_model: metadata.model || '',
+          verifier_model: metadata.verifier_verdict ? 'claude-3-haiku-20240307' : '-',
+          ui_planner_model: '-'
+        },
+        timing_ms: {
+          total: metadata.timing_total || 0,
+          rag: metadata.timing_rag || 0,
+          llm: metadata.timing_llm || 0,
+          verify: metadata.timing_verifier || 0,
+          profile: metadata.timing_profile || 0
+        },
+        token_usage: {
+          input_tokens: metadata.input_tokens || 0,
+          output_tokens: metadata.output_tokens || 0
+        },
+        cost_estimate: metadata.cost_estimate || 0,
+        result_flags: {
+          searched: metadata.searched || false,
+          legal_used: metadata.legal_used || false,
+          fallback_used: metadata.fallback_used || false,
+          fabricated_urls_caught: metadata.fabricated_urls_caught || 0,
+          verifier_verdict: metadata.verifier_verdict || null,
+          verifier_confidence: metadata.verifier_confidence || null,
+          search_valid_listings: metadata.search_valid_listings || 0,
+          search_insufficient: metadata.search_insufficient || false
+        },
         created_at: firebase.firestore.FieldValue.serverTimestamp()
       });
       return runId;

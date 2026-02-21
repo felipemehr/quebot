@@ -270,7 +270,7 @@ function renderTable() {
             cols = ['id', 'case_id', 'role', 'text', 'created_at'];
             break;
         case 'runs':
-            cols = ['id', 'case_id', 'provider', 'models', 'timing_ms', 'cost_estimate', 'created_at'];
+            cols = ['id', 'case_id', 'provider', 'model', 'tokens', 'timing', 'cost_estimate', 'flags', 'created_at'];
             break;
     }
     
@@ -316,6 +316,45 @@ function renderTable() {
                 val = count;
             } else if (c === 'messages' && currentTab === 'cases') {
                 val = `<span class="detail-link" onclick="showMessages('${row.id}')">Ver mensajes</span>`;
+            } else if (c === 'model' && currentTab === 'runs') {
+                // Extract model from nested or flat
+                const models = row.models;
+                const flatModel = row.model;
+                if (models && typeof models === 'object') {
+                    const m = models.reasoner_model || '-';
+                    const short = m.replace('claude-sonnet-4-20250514', 'sonnet-4').replace('gpt-4o-mini', 'gpt-4o-mini').replace('claude-3-haiku-20240307', 'haiku');
+                    val = short;
+                } else if (flatModel) {
+                    val = flatModel.replace('claude-sonnet-4-20250514', 'sonnet-4').replace('gpt-4o-mini', 'gpt-4o-mini');
+                } else {
+                    val = '-';
+                }
+            } else if (c === 'tokens' && currentTab === 'runs') {
+                const tu = row.token_usage;
+                const inT = tu ? (tu.input_tokens || 0) : (row.input_tokens || 0);
+                const outT = tu ? (tu.output_tokens || 0) : (row.output_tokens || 0);
+                val = inT || outT ? inT + '→' + outT : '-';
+            } else if (c === 'timing' && currentTab === 'runs') {
+                const tm = row.timing_ms;
+                if (tm && typeof tm === 'object') {
+                    val = (tm.total || 0) + 'ms';
+                } else if (row.timing_total) {
+                    val = row.timing_total + 'ms';
+                } else {
+                    val = '-';
+                }
+            } else if (c === 'flags' && currentTab === 'runs') {
+                const rf = row.result_flags || {};
+                const fb = rf.fallback_used || row.fallback_used;
+                const vv = rf.verifier_verdict || row.verifier_verdict;
+                let badges = [];
+                if (fb) badges.push('<span class="badge" style="background:#e74c3c;color:#fff">fallback</span>');
+                if (vv) badges.push('<span class="badge" style="background:#27ae60;color:#fff">' + vv + '</span>');
+                if (rf.searched || row.searched) badges.push('<span class="badge" style="background:#3498db;color:#fff">search</span>');
+                if (rf.legal_used || row.legal_used) badges.push('<span class="badge" style="background:#8e44ad;color:#fff">legal</span>');
+                val = badges.length ? badges.join(' ') : '-';
+            } else if (c === 'cost_estimate' && currentTab === 'runs') {
+                val = row.cost_estimate && row.cost_estimate > 0 ? '$' + Number(row.cost_estimate).toFixed(4) : '-';
             } else if (c === 'id' && typeof val === 'string' && val.length > 12) {
                 val = val.substring(0, 12) + '...';
             } else if (c === 'user_id' && typeof val === 'string' && val.length > 12) {
