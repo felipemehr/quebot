@@ -589,6 +589,7 @@ if ($shouldSearch) {
     } catch (\Throwable $e) {
         error_log("SearchOrchestrator error: " . $e->getMessage());
         $detectedVertical = $vertical ?? 'unknown';
+        $searchVertical = $detectedVertical; // Preserve for done event tracking
         if ($detectedVertical === 'real_estate') {
             $searchContext = "\n\n🔍 BÚSQUEDA para \"{$searchQuery}\": Error en la búsqueda. Informa al usuario que hubo un problema técnico buscando propiedades. Puede intentar nuevamente en unos minutos. Como alternativa, puede buscar directamente en portalinmobiliario.com, yapo.cl, toctoc.com\n";
         } else {
