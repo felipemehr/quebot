@@ -9,6 +9,10 @@ const UI = {
     pendingRenders: {},
     _thinkingInterval: null,
     _thinkingIndex: 0,
+    _streamBuffer: '',
+    _streamMessageAppended: false,
+    _tokenRenderTimer: null,
+    _tokenRenderPending: false,
 
     /**
      * Inicializar referencias a elementos del DOM
@@ -469,7 +473,7 @@ const UI = {
      * Actualizar contenido del último mensaje del asistente
      */
     updateLastAssistantMessage(content) {
-        const messages = this.elements.messagesList.querySelectorAll('.message.assistant');
+        const messages = this.elements.messagesList.querySelectorAll('.message.assistant:not(.thinking-log-container)');
         if (messages.length > 0) {
             const lastMessage = messages[messages.length - 1];
             const bodyEl = lastMessage.querySelector('.message-body');
@@ -677,15 +681,14 @@ const UI = {
     },
 
     /**
-     * Agregar indicador de pensamiento con pasos contextuales
+     * Add thinking log (SSE mode) — real pipeline steps from backend
      */
-    addTypingIndicator(query) {
+    addThinkingLog() {
+        this._streamBuffer = '';
+        this._streamMessageAppended = false;
+
         const div = document.createElement('div');
-        div.className = 'message assistant typing';
-        
-        const steps = this._buildThinkingSteps(query);
-        const firstStep = steps[0];
-        
+        div.className = 'message assistant thinking-log-container';
         div.innerHTML = `
             <div class="message-avatar">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -699,43 +702,130 @@ const UI = {
                     <span class="message-author">QueBot</span>
                 </div>
                 <div class="message-body">
-                    <div class="thinking-indicator">
-                        <div class="thinking-spinner"></div>
-                        <span class="thinking-text">${firstStep.text}</span>
+                    <div class="thinking-log">
+                        <div class="thinking-log-steps"></div>
                     </div>
                 </div>
             </div>
         `;
         this.elements.messagesList.appendChild(div);
         this.scrollToBottom();
-
-        this._thinkingIndex = 0;
-        this._thinkingInterval = setInterval(() => {
-            this._thinkingIndex = (this._thinkingIndex + 1) % steps.length;
-            const step = steps[this._thinkingIndex];
-            const textEl = document.querySelector('.thinking-indicator .thinking-text');
-            if (textEl) {
-                textEl.style.opacity = '0';
-                setTimeout(() => {
-                    textEl.textContent = step.text;
-                    textEl.style.opacity = '1';
-                }, 200);
-            }
-        }, 2500);
     },
 
     /**
-     * Remover indicador de pensamiento
+     * Add a real pipeline step to the thinking log
+     */
+    addThinkingStep(stage, detail) {
+        const stepsContainer = document.querySelector('.thinking-log-steps');
+        if (!stepsContainer) return;
+
+        // Complete previous active step
+        const prev = stepsContainer.querySelector('.thinking-step.active');
+        if (prev) {
+            prev.classList.remove('active');
+            prev.classList.add('completed');
+            const icon = prev.querySelector('.step-icon');
+            if (icon) icon.innerHTML = '✓';
+        }
+
+        const step = document.createElement('div');
+        step.className = 'thinking-step active';
+        step.innerHTML = `
+            <span class="step-icon"><span class="step-spinner"></span></span>
+            <span class="step-text">${this.escapeHtml(detail)}</span>
+        `;
+        stepsContainer.appendChild(step);
+        this.scrollToBottom();
+    },
+
+    /**
+     * Transition from thinking log to streaming response
+     */
+    startStreaming() {
+        // Mark last step as completed
+        const stepsContainer = document.querySelector('.thinking-log-steps');
+        if (stepsContainer) {
+            const last = stepsContainer.querySelector('.thinking-step.active');
+            if (last) {
+                last.classList.remove('active');
+                last.classList.add('completed');
+                const icon = last.querySelector('.step-icon');
+                if (icon) icon.innerHTML = '\u2713';
+            }
+        }
+
+        // Add "writing" step  
+        this.addThinkingStep('writing', 'Escribiendo respuesta...');
+
+        // Create message bubble IMMEDIATELY (no delay)
+        // Thinking log stays visible and scrolls up naturally
+        this._streamMessageAppended = true;
+        this.appendMessage({
+            id: Date.now(),
+            role: 'assistant',
+            content: '',
+            timestamp: new Date().toISOString()
+        }, true);
+
+        // Fade out thinking log after a short moment (it scrolls up naturally)
+        setTimeout(() => {
+            const thinkingContainer = document.querySelector('.thinking-log-container');
+            if (thinkingContainer) {
+                thinkingContainer.style.transition = 'opacity 0.6s ease, max-height 0.6s ease';
+                thinkingContainer.style.opacity = '0';
+                thinkingContainer.style.maxHeight = '0';
+                thinkingContainer.style.overflow = 'hidden';
+                setTimeout(() => thinkingContainer.remove(), 700);
+            }
+        }, 1500);
+    },
+
+    /**
+     * Append a token to the streaming response (throttled rendering)
+     */
+    appendStreamToken(token) {
+        this._streamBuffer += token;
+
+        // Throttle re-renders to ~15fps for smooth progressive display
+        if (!this._tokenRenderPending) {
+            this._tokenRenderPending = true;
+            if (this._tokenRenderTimer) cancelAnimationFrame(this._tokenRenderTimer);
+            this._tokenRenderTimer = requestAnimationFrame(() => {
+                this._tokenRenderPending = false;
+                // Only render when message bubble exists
+                if (this._streamMessageAppended) {
+                    this.updateLastAssistantMessage(this._streamBuffer);
+                    this.scrollToBottom();
+                }
+            });
+        }
+    },
+
+    /**
+     * Legacy: Add typing indicator (fallback for non-SSE mode)
+     */
+    addTypingIndicator(query) {
+        // In SSE mode, addThinkingLog() is used instead.
+        // Keep this for backward compatibility.
+        this.addThinkingLog();
+    },
+
+    /**
+     * Remove thinking indicator / thinking log
      */
     removeTypingIndicator() {
         if (this._thinkingInterval) {
             clearInterval(this._thinkingInterval);
             this._thinkingInterval = null;
         }
-        const typing = this.elements.messagesList.querySelector('.message.typing');
-        if (typing) {
-            typing.remove();
+        if (this._tokenRenderTimer) {
+            cancelAnimationFrame(this._tokenRenderTimer);
+            this._tokenRenderTimer = null;
         }
+        const typing = this.elements.messagesList.querySelector('.message.typing');
+        if (typing) typing.remove();
+        const thinkingLog = this.elements.messagesList.querySelector('.thinking-log-container');
+        if (thinkingLog) thinkingLog.remove();
     },
 
     /**
