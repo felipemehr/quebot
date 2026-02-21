@@ -331,7 +331,7 @@ class SearchOrchestrator {
             'Melipeuco' => ['Cunco', 'Villarrica', 'Pucón'],
             'Curacautín' => ['Lonquimay', 'Victoria', 'Lautaro'],
             'Pucón' => ['Villarrica', 'Cunco', 'Loncoche'],
-            'Villarrica' => ['Pucón', 'Cunco', 'Freire'],
+            'Villarrica' => ['Pucón', 'Loncoche', 'Freire'],
             'Cunco' => ['Melipeuco', 'Villarrica', 'Temuco'],
             'Lonquimay' => ['Curacautín', 'Victoria', 'Melipeuco'],
             'Hornopirén' => ['Hualaihué', 'Calbuco', 'Puerto Montt'],
@@ -486,7 +486,7 @@ class SearchOrchestrator {
 
         // === URBAN CONTEXT ===
         if (!empty($contextResults)) {
-            $ctx .= "🏨 CONTEXTO URBANO Y DE MERCADO:\n";
+            $ctx .= "🏘️ CONTEXTO URBANO Y DE MERCADO:\n";
             foreach ($contextResults as $i => $cr) {
                 $ctx .= "  " . ($i + 1) . ". {$cr['title']}\n";
                 if ($cr['snippet']) {
