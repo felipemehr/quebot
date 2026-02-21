@@ -378,7 +378,7 @@ const UI = {
         div.dataset.messageId = message.id;
 
         const time = message.timestamp ? this.formatTime(message.timestamp) : '';
-        const authorName = message.role === 'user' ? 'T\u00fa' : 'QueBot';
+        const authorName = message.role === 'user' ? 'Tú' : 'QueBot';
         const avatarContent = message.role === 'user' 
             ? 'F' 
             : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -452,8 +452,8 @@ const UI = {
                 
                 this.pendingRenders[renderId] = { type, title, data };
                 
-                const icon = type === 'map' ? '\ud83d\uddfa\ufe0f' : type === 'table' ? '\ud83d\udcca' : '\ud83d\udcc8';
-                const label = type === 'map' ? 'Ver Mapa' : type === 'table' ? 'Ver Tabla' : 'Ver Gr\u00e1fico';
+                const icon = type === 'map' ? '🗺️' : type === 'table' ? '📊' : '📈';
+                const label = type === 'map' ? 'Ver Mapa' : type === 'table' ? 'Ver Tabla' : 'Ver Gráfico';
                 
                 return `<button class="render-btn render-btn-${type}" data-render-id="${renderId}">${icon} ${label}: ${this.escapeHtml(title)}</button>`;
             } catch (e) {
@@ -466,7 +466,7 @@ const UI = {
     },
 
     /**
-     * Actualizar contenido del \u00faltimo mensaje del asistente
+     * Actualizar contenido del último mensaje del asistente
      */
     updateLastAssistantMessage(content) {
         const messages = this.elements.messagesList.querySelectorAll('.message.assistant');
@@ -498,11 +498,194 @@ const UI = {
     },
 
     /**
-     * Agregar indicador de pensamiento con pasos animados
+     * Detectar tipo de consulta y generar pasos contextuales
      */
-    addTypingIndicator() {
+    _buildThinkingSteps(query) {
+        if (!query) return this._defaultThinkingSteps();
+        
+        const q = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        
+        // Extract key terms for personalization
+        const location = this._extractLocation(q);
+        const topic = this._extractTopic(q);
+        
+        // Detect vertical
+        if (this._isRealEstateQuery(q)) return this._realEstateSteps(q, location);
+        if (this._isLegalQuery(q)) return this._legalSteps(q, topic);
+        if (this._isNewsQuery(q)) return this._newsSteps(q, topic);
+        if (this._isRetailQuery(q)) return this._retailSteps(q, topic);
+        if (this._isMapQuery(q)) return this._mapSteps(q, location);
+        
+        // General with search detection
+        if (q.includes('busca') || q.includes('encuentra') || q.includes('donde') || q.includes('como') || q.includes('quien')) {
+            return this._searchSteps(q, topic);
+        }
+        
+        return this._conversationalSteps(q);
+    },
+    
+    _isRealEstateQuery(q) {
+        const t = ['parcela', 'terreno', 'casa', 'depto', 'departamento', 'propiedad', 'arriendo',
+                    'arrienda', 'venta', 'inmobili', 'hectarea', 'sitio', 'lote', 'condominio',
+                    'dormitorio', '3d', '2d', '4d', 'uf ', 'cabana', 'fundo', 'agricola', 'chacra'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _isLegalQuery(q) {
+        const t = ['ley ', 'codigo', 'articulo', 'norma', 'decreto', 'legal', 'dfl ', 'reglamento',
+                    'constitucion', 'tribunal', 'copropiedad', 'urbanismo', 'procedimiento', 'derecho',
+                    'contrato', 'demanda', 'recurso'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _isNewsQuery(q) {
+        const t = ['noticia', 'hoy', 'ayer', 'actualidad', 'ultima hora', 'reciente',
+                    'paso con', 'paso en', 'crisis', 'elecciones', 'gobierno', 'economia'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _isRetailQuery(q) {
+        const t = ['precio', 'comprar', 'tienda', 'oferta', 'descuento', 'notebook',
+                    'celular', 'telefono', 'electrodomestico', 'barato', 'mejor precio'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _isMapQuery(q) {
+        const t = ['mapa', 'ubicacion', 'donde queda', 'coordenada', 'muestrame el mapa'];
+        return t.some(x => q.includes(x));
+    },
+    
+    _extractLocation(q) {
+        const cities = {
+            'santiago': 'Santiago', 'valparaiso': 'Valparaíso', 'vina del mar': 'Viña del Mar',
+            'concepcion': 'Concepción', 'la serena': 'La Serena', 'antofagasta': 'Antofagasta',
+            'temuco': 'Temuco', 'rancagua': 'Rancagua', 'talca': 'Talca', 'arica': 'Arica',
+            'iquique': 'Iquique', 'puerto montt': 'Puerto Montt', 'osorno': 'Osorno',
+            'valdivia': 'Valdivia', 'chillan': 'Chillán', 'copiapo': 'Copiapó',
+            'punta arenas': 'Punta Arenas', 'melipeuco': 'Melipeuco', 'pucon': 'Pucón',
+            'villarrica': 'Villarrica', 'olmue': 'Olmué', 'limache': 'Limache',
+            'curico': 'Curicó', 'linares': 'Linares', 'los angeles': 'Los Ángeles',
+            'coyhaique': 'Coyhaique', 'calama': 'Calama', 'ovalle': 'Ovalle'
+        };
+        for (const [key, name] of Object.entries(cities)) {
+            if (q.includes(key)) return name;
+        }
+        const m = q.match(/\ben\s+([a-z\s]{3,20}?)(?:\s+(?:de|con|por|que|a |,|$))/);
+        if (m) return m[1].trim().replace(/\b\w/g, l => l.toUpperCase());
+        return null;
+    },
+    
+    _extractTopic(q) {
+        const stop = ['que', 'como', 'donde', 'busca', 'buscar', 'encuentra', 'quiero', 'necesito',
+                       'sobre', 'del', 'los', 'las', 'una', 'por', 'para', 'con', 'mas', 'muy',
+                       'hoy', 'ayer', 'mapa', 'dame', 'dime', 'cual', 'son', 'hay', 'tiene'];
+        const words = q.split(/\s+/).filter(w => w.length > 2 && !stop.includes(w));
+        return words.length > 0 ? words.slice(0, 3).join(' ') : null;
+    },
+    
+    _realEstateSteps(q, location) {
+        const loc = location ? ` en ${location}` : '';
+        const locShort = location || 'la zona';
+        return [
+            { icon: '🏠', text: `Detectando búsqueda inmobiliaria${loc}...` },
+            { icon: '🔎', text: `Generando búsquedas optimizadas para ${locShort}...` },
+            { icon: '🌐', text: 'Consultando portalinmobiliario.com, toctoc.com, yapo.cl...' },
+            { icon: '📄', text: 'Extrayendo datos de publicaciones encontradas...' },
+            { icon: '💰', text: 'Validando precios, superficies y UF...' },
+            { icon: '📊', text: 'Ranking resultados por relevancia y confiabilidad...' },
+            { icon: '✅', text: 'Verificando links y datos reales...' },
+            { icon: '✍️', text: 'Armando tabla comparativa...' },
+            { icon: '🔍', text: 'Control de calidad: verificando precisión...' }
+        ];
+    },
+    
+    _legalSteps(q, topic) {
+        const lawMatch = q.match(/ley\s*(\d[\d.]*)/);
+        const codeMatch = q.match(/codigo\s+(civil|penal|procedimiento|trabajo|comercio|aguas)/);
+        const artMatch = q.match(/articulo\s*(\d+)/);
+        let lawName = topic || 'normativa';
+        if (lawMatch) lawName = `Ley ${lawMatch[1]}`;
+        if (codeMatch) lawName = `Código ${codeMatch[1].charAt(0).toUpperCase() + codeMatch[1].slice(1)}`;
+        return [
+            { icon: '⚖️', text: `Detectando consulta legal: ${lawName}...` },
+            { icon: '📚', text: 'Buscando en base de datos legal (5.344 artículos)...' },
+            { icon: '🔎', text: artMatch ? `Localizando artículo ${artMatch[1]}...` : `Buscando artículos de ${lawName}...` },
+            { icon: '📖', text: 'Consultando LeyChile y BCN...' },
+            { icon: '🧠', text: 'Analizando texto legal aplicable...' },
+            { icon: '✍️', text: 'Preparando respuesta con referencias...' }
+        ];
+    },
+    
+    _newsSteps(q, topic) {
+        const t = topic || 'actualidad';
+        return [
+            { icon: '📰', text: `Buscando noticias: ${t}...` },
+            { icon: '🌐', text: 'Consultando La Tercera, Emol, BioBio Chile...' },
+            { icon: '📄', text: 'Extrayendo artículos recientes...' },
+            { icon: '✅', text: 'Verificando fuentes y fechas...' },
+            { icon: '✍️', text: 'Preparando resumen noticioso...' }
+        ];
+    },
+    
+    _retailSteps(q, topic) {
+        const t = topic || 'productos';
+        return [
+            { icon: '🛒', text: `Buscando ${t}...` },
+            { icon: '🌐', text: 'Consultando Solotodo, Falabella, Ripley, PCFactory...' },
+            { icon: '💰', text: 'Extrayendo precios y ofertas...' },
+            { icon: '📊', text: 'Comparando opciones...' },
+            { icon: '✍️', text: 'Preparando comparativa...' }
+        ];
+    },
+    
+    _mapSteps(q, location) {
+        const loc = location || 'la zona';
+        return [
+            { icon: '🗺️', text: `Preparando mapa de ${loc}...` },
+            { icon: '📍', text: 'Obteniendo coordenadas verificadas...' },
+            { icon: '🎨', text: 'Generando visualización interactiva...' },
+            { icon: '✍️', text: 'Listo para mostrar...' }
+        ];
+    },
+    
+    _searchSteps(q, topic) {
+        const t = topic || 'tu consulta';
+        return [
+            { icon: '🔍', text: `Analizando: ${t}...` },
+            { icon: '🌐', text: 'Buscando en fuentes confiables...' },
+            { icon: '📄', text: 'Revisando páginas encontradas...' },
+            { icon: '📊', text: 'Procesando y verificando datos...' },
+            { icon: '✍️', text: 'Preparando respuesta...' }
+        ];
+    },
+    
+    _conversationalSteps(q) {
+        return [
+            { icon: '🧠', text: 'Procesando tu mensaje...' },
+            { icon: '💭', text: 'Pensando la mejor respuesta...' },
+            { icon: '✍️', text: 'Escribiendo...' }
+        ];
+    },
+    
+    _defaultThinkingSteps() {
+        return [
+            { icon: '🔍', text: 'Analizando consulta...' },
+            { icon: '🌐', text: 'Buscando información...' },
+            { icon: '📊', text: 'Procesando resultados...' },
+            { icon: '✍️', text: 'Preparando respuesta...' }
+        ];
+    },
+
+    /**
+     * Agregar indicador de pensamiento con pasos contextuales
+     */
+    addTypingIndicator(query) {
         const div = document.createElement('div');
         div.className = 'message assistant typing';
+        
+        const steps = this._buildThinkingSteps(query);
+        const firstStep = steps[0];
+        
         div.innerHTML = `
             <div class="message-avatar">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -518,7 +701,7 @@ const UI = {
                 <div class="message-body">
                     <div class="thinking-indicator">
                         <div class="thinking-spinner"></div>
-                        <span class="thinking-text">Analizando consulta...</span>
+                        <span class="thinking-text">${firstStep.text}</span>
                     </div>
                 </div>
             </div>
@@ -526,17 +709,7 @@ const UI = {
         this.elements.messagesList.appendChild(div);
         this.scrollToBottom();
 
-        // Cycle through thinking steps
-        const steps = [
-            { icon: '\ud83d\udd0d', text: 'Analizando consulta...' },
-            { icon: '\ud83c\udf10', text: 'Buscando informaci\u00f3n...' },
-            { icon: '\ud83d\udcc4', text: 'Revisando p\u00e1ginas...' },
-            { icon: '\ud83d\udcca', text: 'Procesando resultados...' },
-            { icon: '\ud83d\udcb0', text: 'Consultando valores...' },
-            { icon: '\u270d\ufe0f', text: 'Preparando respuesta...' }
-        ];
         this._thinkingIndex = 0;
-
         this._thinkingInterval = setInterval(() => {
             this._thinkingIndex = (this._thinkingIndex + 1) % steps.length;
             const step = steps[this._thinkingIndex];
@@ -600,7 +773,7 @@ const UI = {
     },
 
     /**
-     * Actualizar t\u00edtulo del chat
+     * Actualizar título del chat
      */
     setChatTitle(title) {
         this.elements.chatTitle.textContent = title;
@@ -634,7 +807,7 @@ const UI = {
     },
 
     /**
-     * Mostrar toast de notificaci\u00f3n
+     * Mostrar toast de notificación
      */
     showToast(message, type = 'info', duration = 5000) {
         const toast = document.createElement('div');
