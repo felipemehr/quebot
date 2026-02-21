@@ -4,16 +4,20 @@
  * 
  * Strategy:
  * - Chunk base: Artículo (each article = 1 chunk)
- * - Sub-chunk if article > threshold: split by incisos/numerales/letras
- * - Path format: Art_19, Art_19/Inc_2, Art_19/Inc_2/Let_b
+ * - Sub-chunk if article > ~700 words: split by incisos → numerales → letras
+ * - Path format: Art_19, Art_19/Inc_2, Art_19/Inc_2/Num_3, Art_19/Inc_2/Let_b
+ * - Each chunk: 150-700 words, juridically coherent
  * - Always keep full article text reconstructable
  * - Groupers (Título, Capítulo) are stored as parent chunks
  */
 
 class LegalChunker {
     
-    /** Max chars before sub-chunking an article */
-    private const SUB_CHUNK_THRESHOLD = 2000;
+    /** Max chars before sub-chunking an article (~700 words) */
+    private const SUB_CHUNK_THRESHOLD = 4500;
+    
+    /** Minimum chars for a standalone chunk (~150 words) */
+    private const MIN_CHUNK_SIZE = 900;
     
     /**
      * Convert parsed norm articles into flat chunk list
@@ -65,7 +69,9 @@ class LegalChunker {
         
         // If it's an article and exceeds threshold, create sub-chunks
         if ($chunkInfo['type'] === 'article' && strlen($mainChunk['texto_plain']) > self::SUB_CHUNK_THRESHOLD) {
-            $mainChunk['children'] = $this->subChunkArticle($mainChunk['texto_plain'], $path);
+            $subChunks = $this->subChunkArticle($mainChunk['texto_plain'], $path);
+            // Merge small sub-chunks to meet minimum size
+            $mainChunk['children'] = $this->mergeSmallChunks($subChunks);
         }
         
         $chunks[] = $mainChunk;
@@ -108,18 +114,20 @@ class LegalChunker {
     }
     
     /**
-     * Sub-chunk a long article into incisos/numerales/letras
+     * Sub-chunk a long article into incisos → numerales → letras
+     * Hierarchy: Article → Incisos → Numerales → Letras
      */
     private function subChunkArticle(string $text, string $parentPath): array {
         $subChunks = [];
         $order = 0;
         
-        // Split by incisos (paragraphs after the article header)
-        // Pattern: lines that start after "Artículo X.-" 
+        // Split by incisos (paragraphs separated by double newlines or indentation)
         $lines = preg_split('/\n\s*\n|\n(?=\s{3,})/', $text);
         
         if (count($lines) <= 1) {
-            // Try splitting by lettered items: a), b), c)...
+            // If no incisos found, try numerals first, then letters
+            $numChunks = $this->splitByNumerals($text, $parentPath);
+            if (!empty($numChunks)) return $numChunks;
             return $this->splitByLetters($text, $parentPath);
         }
         
@@ -144,8 +152,12 @@ class LegalChunker {
                 'children' => [],
             ];
             
-            // Check if this inciso has lettered items
-            if (preg_match_all('/\b[a-z]\)\s/', $line, $matches) > 2) {
+            // Check if this inciso has numbered items: 1., 2., 3. or 1°, 2°, 3°
+            if (preg_match_all('/(?:^|\n)\s*\d+[\.\°\)\-]\s/', $line, $matches) > 2) {
+                $subChunk['children'] = $this->splitByNumerals($line, $incPath);
+            }
+            // Check if this inciso has lettered items: a), b), c)
+            elseif (preg_match_all('/\b[a-z]\)\s/', $line, $matches) > 2) {
                 $subChunk['children'] = $this->splitByLetters($line, $incPath);
             }
             
@@ -153,6 +165,55 @@ class LegalChunker {
         }
         
         return $subChunks;
+    }
+    
+    /**
+     * Split text by numbered items: 1., 2., 3. or 1°, 2° or 1), 2) or 1.-, 2.-
+     */
+    private function splitByNumerals(string $text, string $parentPath): array {
+        // Match patterns: "1. ", "1° ", "1) ", "1.- "
+        $parts = preg_split('/(?=(?:^|\n)\s*(\d+)[\.\°\)\-]+\s)/m', $text, -1, PREG_SPLIT_NO_EMPTY);
+        if (count($parts) <= 1) return [];
+        
+        $chunks = [];
+        $order = 0;
+        
+        foreach ($parts as $part) {
+            $part = trim($part);
+            if (empty($part)) continue;
+            
+            $order++;
+            // Extract numeral if present
+            $numeral = $order;
+            if (preg_match('/^(\d+)[\.\°\)\-]/', $part, $m)) {
+                $numeral = (int)$m[1];
+            }
+            
+            $numPath = $parentPath . '/Num_' . $numeral;
+            
+            $numChunk = [
+                'chunk_type' => 'numeral',
+                'chunk_path' => $numPath,
+                'id_parte' => null,
+                'nombre_parte' => "Numeral $numeral",
+                'titulo_parte' => '',
+                'texto' => $part,
+                'texto_plain' => $part,
+                'ordering' => $order,
+                'derogado' => false,
+                'transitorio' => false,
+                'children' => [],
+            ];
+            
+            // Check if this numeral has lettered sub-items
+            if (preg_match_all('/\b[a-z]\)\s/', $part, $matches) > 2) {
+                $numChunk['children'] = $this->splitByLetters($part, $numPath);
+            }
+            
+            $chunks[] = $numChunk;
+        }
+        
+        return $chunks;
     }
     
     /**
@@ -194,6 +255,64 @@ class LegalChunker {
         }
         
         return $chunks;
+    }
+    
+    /**
+     * Merge chunks that are too small (< MIN_CHUNK_SIZE) with their neighbor
+     * Ensures each chunk has at least ~150 words for meaningful retrieval
+     */
+    private function mergeSmallChunks(array $chunks): array {
+        if (count($chunks) <= 1) return $chunks;
+        
+        $merged = [];
+        $buffer = null;
+        
+        foreach ($chunks as $chunk) {
+            $size = strlen($chunk['texto_plain'] ?? $chunk['texto']);
+            
+            if ($buffer !== null) {
+                $bufferSize = strlen($buffer['texto_plain'] ?? $buffer['texto']);
+                
+                if ($bufferSize < self::MIN_CHUNK_SIZE) {
+                    // Merge buffer into current chunk
+                    $chunk['texto_plain'] = $buffer['texto_plain'] . "\n\n" . ($chunk['texto_plain'] ?? $chunk['texto']);
+                    $chunk['texto'] = $buffer['texto'] . "\n\n" . $chunk['texto'];
+                    $chunk['nombre_parte'] = $buffer['nombre_parte'] . ' + ' . $chunk['nombre_parte'];
+                    // Keep buffer's path if it was first
+                    $buffer = null;
+                } else {
+                    $merged[] = $buffer;
+                    $buffer = null;
+                }
+            }
+            
+            if ($size < self::MIN_CHUNK_SIZE && count($chunks) > 1) {
+                $buffer = $chunk;
+            } else {
+                $merged[] = $chunk;
+            }
+        }
+        
+        // Handle remaining buffer
+        if ($buffer !== null) {
+            if (!empty($merged)) {
+                // Merge with last chunk
+                $last = array_pop($merged);
+                $last['texto_plain'] .= "\n\n" . ($buffer['texto_plain'] ?? $buffer['texto']);
+                $last['texto'] .= "\n\n" . $buffer['texto'];
+                $last['nombre_parte'] .= ' + ' . $buffer['nombre_parte'];
+                $merged[] = $last;
+            } else {
+                $merged[] = $buffer;
+            }
+        }
+        
+        // Re-number ordering
+        foreach ($merged as $i => &$chunk) {
+            $chunk['ordering'] = $i + 1;
+        }
+        
+        return $merged;
     }
     
     /**

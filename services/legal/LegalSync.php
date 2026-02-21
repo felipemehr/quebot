@@ -3,6 +3,7 @@
  * QueBot Legal Library - Sync Runner
  * Orchestrates: fetch from BCN → parse → chunk → store in DB
  * Detects changes via text hash comparison
+ * Uses DB transactions for consistency
  */
 
 require_once __DIR__ . '/database.php';
@@ -97,12 +98,16 @@ class LegalSync {
     
     /**
      * Sync a single norm (fetch, parse, compare, store)
+     * Steps 1-3 are read-only (fetch, parse, compare hash).
+     * Steps 4-8 modify DB and are wrapped in a transaction for consistency.
      */
     private function syncNorm(array $norm): void {
         $this->stats['norms_checked']++;
         $idNorma = $norm['id_norma'];
         
         try {
+            // --- READ-ONLY PHASE (no transaction needed) ---
+            
             // 1. Fetch XML from BCN
             $result = $this->connector->fetchNorm($idNorma);
             if ($result['error']) {
@@ -122,25 +127,36 @@ class LegalSync {
                 return;
             }
             
-            // 4. Update norm metadata
-            $this->updateNormMetadata($norm['id'], $parsed);
+            // --- WRITE PHASE (wrapped in transaction) ---
             
-            // 5. Create new version
-            $versionId = $this->createVersion($norm['id'], $parsed);
+            $this->db->beginTransaction();
             
-            // 6. Delete old chunks for this norm
-            $deleted = $this->deleteOldChunks($norm['id']);
-            $this->stats['chunks_deleted'] += $deleted;
-            
-            // 7. Chunk and store articles
-            $chunks = $this->chunker->chunkArticles($parsed['articles']);
-            $created = $this->storeChunks($chunks, $versionId, $norm['id']);
-            $this->stats['chunks_created'] += $created;
-            
-            // 8. Mark previous versions as superseded
-            $this->supersedePreviousVersions($norm['id'], $versionId);
-            
-            $this->stats['norms_updated']++;
+            try {
+                // 4. Update norm metadata
+                $this->updateNormMetadata($norm['id'], $parsed);
+                
+                // 5. Create new version
+                $versionId = $this->createVersion($norm['id'], $parsed);
+                
+                // 6. Delete old chunks for this norm
+                $deleted = $this->deleteOldChunks($norm['id']);
+                $this->stats['chunks_deleted'] += $deleted;
+                
+                // 7. Chunk and store articles
+                $chunks = $this->chunker->chunkArticles($parsed['articles']);
+                $created = $this->storeChunks($chunks, $versionId, $norm['id']);
+                $this->stats['chunks_created'] += $created;
+                
+                // 8. Mark previous versions as superseded
+                $this->supersedePreviousVersions($norm['id'], $versionId);
+                
+                $this->db->commit();
+                $this->stats['norms_updated']++;
+                
+            } catch (Exception $e) {
+                $this->db->rollBack();
+                throw $e; // Re-throw to be caught by outer catch
+            }
             
         } catch (Exception $e) {
             $this->stats['norms_failed']++;
@@ -307,12 +323,13 @@ class LegalSync {
     private function seedCoreNorms(): array {
         $coreNormsEnv = getenv('LEGAL_CORE_NORMS');
         if (!$coreNormsEnv) {
-            // Default core set: important Chilean laws
+            // Core set: verified against BCN LeyChile XML (Feb 2026)
             $defaultNorms = [
-                '141599',  // Ley 19628 - Protección de datos personales
-                '242302',  // Ley 20285 - Transparencia y acceso a la información pública
-                '29726',   // DFL 1 Código Civil
-                '276268',  // Ley 21131 - Pago a 30 días
+                '172986',   // Código Civil (DFL 1, 2000) - 2.9 MB XML
+                '22740',    // Código de Procedimiento Civil (1902) - 57 MB XML
+                '13560',    // DFL 458 Ley General de Urbanismo y Construcciones - 484 KB
+                '1174663',  // Ley 21.442 Copropiedad Inmobiliaria (reemplaza 19537) - 590 KB
+                '210676',   // Ley 19.880 Procedimiento Administrativo - 110 KB
             ];
         } else {
             // Parse JSON array or CSV
