@@ -570,16 +570,17 @@ textarea {
 
 .quick-actions-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
 }
 
 .action-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 28px 16px;
+    gap: 8px;
+    padding: 20px 12px;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 12px;
@@ -589,6 +590,9 @@ textarea {
     cursor: pointer;
     box-shadow: var(--shadow-md);
     transition: all 0.2s ease;
+    text-align: center;
+    min-height: 120px;
+    justify-content: center;
 }
 
 .action-card:hover {
@@ -610,6 +614,54 @@ textarea {
 .action-card-icon svg {
     width: 24px;
     height: 24px;
+}
+
+.action-card-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.action-card-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+/* ========================================
+   Filter Buttons (Card Flow)
+   ======================================== */
+
+.filter-buttons-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 8px;
+}
+
+.filter-btn {
+    padding: 6px 16px;
+    border-radius: 20px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+
+.filter-btn:hover {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+}
+
+.filter-btn.active {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
 }
 
 /* ========================================
@@ -1638,12 +1690,22 @@ textarea {
     
     .quick-actions-grid {
         grid-template-columns: repeat(2, 1fr);
-        gap: 12px;
+        gap: 10px;
     }
     
     .action-card {
-        padding: 20px 12px;
+        padding: 16px 10px;
         font-size: 0.8rem;
+        min-height: 100px;
+    }
+    
+    .filter-buttons-row {
+        gap: 6px;
+    }
+    
+    .filter-btn {
+        padding: 5px 12px;
+        font-size: 12px;
     }
     
     .how-it-works {

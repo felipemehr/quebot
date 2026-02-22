@@ -117,13 +117,11 @@ const App = {
         UI.elements.attachBtn.addEventListener('click', () => UI.elements.fileInput.click());
         UI.elements.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
 
-        // Suggestion cards
+        // Interactive card flow — multi-step selection
         document.querySelectorAll('.action-card').forEach(card => {
             card.addEventListener('click', () => {
-                const prompt = card.dataset.prompt;
-                UI.elements.messageInput.value = prompt;
-                UI.autoResizeInput();
-                this.sendMessage();
+                const cardType = card.dataset.cardType;
+                this.handleCardClick(cardType);
             });
         });
 
@@ -324,6 +322,147 @@ const App = {
         return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     },
 
+
+    /**
+     * Card configurations for the interactive flow
+     */
+    cardConfigs: {
+        news: {
+            intro: 'Resumen de noticias relevantes con fuentes verificadas. ¿Qué tema te interesa?',
+            filters: ['Chile', 'Internacional', 'Economía', 'Política', 'Tecnología']
+        },
+        prices: {
+            intro: 'Dólar, UF, euro y más. Datos en tiempo real para decisiones financieras.',
+            filters: ['Dólar', 'UF', 'Euro', 'Bitcoin', 'Indicadores']
+        },
+        property: {
+            intro: 'Trabajo con propiedades reales en Chile.\nPuedo ayudarte a comprar, vender o evaluar una inversión.',
+            filters: ['Comprar', 'Vender', 'Arrendar', 'Invertir', 'Tasar'],
+            subFilters: {
+                'Comprar': {
+                    options: ['Casa', 'Departamento', 'Parcela', 'Oficina', 'Comercial'],
+                    followUp: '¿En qué comuna y rango de presupuesto estás mirando?'
+                }
+            }
+        },
+        analysis: {
+            intro: 'Analizo datos, comparo opciones y construyo estrategias. ¿Qué necesitas evaluar?',
+            filters: ['Comparar', 'Evaluar', 'Investigar', 'Resumir']
+        },
+        code: {
+            intro: 'PHP, JavaScript, Python, SQL y más. ¿Qué necesitas resolver?',
+            filters: ['Debug', 'Refactor', 'Nuevo código', 'Explicar', 'SQL']
+        }
+    },
+
+    /**
+     * Active card flow state
+     */
+    _activeCardType: null,
+    _activeFilters: [],
+
+    /**
+     * Handle card click — interactive multi-step flow
+     */
+    handleCardClick(cardType) {
+        const config = this.cardConfigs[cardType];
+        if (!config) return;
+
+        this._activeCardType = cardType;
+        this._activeFilters = [];
+
+        // Hide the welcome screen
+        UI.elements.welcomeScreen.classList.add('hidden');
+
+        // Create assistant message with intro text
+        const introMessage = {
+            id: Date.now(),
+            role: 'assistant',
+            content: config.intro,
+            timestamp: new Date().toISOString()
+        };
+        UI.appendMessage(introMessage, true);
+
+        // Add filter buttons below the last message
+        this._renderFilterButtons(config.filters, cardType, false);
+    },
+
+    /**
+     * Render filter buttons as a row in the chat
+     */
+    _renderFilterButtons(filters, cardType, isSubFilter) {
+        const container = document.createElement('div');
+        container.className = 'filter-buttons-row';
+        container.dataset.cardType = cardType;
+        if (isSubFilter) container.dataset.subFilter = 'true';
+
+        filters.forEach(label => {
+            const btn = document.createElement('button');
+            btn.className = 'filter-btn';
+            btn.textContent = label;
+            btn.addEventListener('click', () => {
+                this._handleFilterClick(btn, label, cardType, isSubFilter, container);
+            });
+            container.appendChild(btn);
+        });
+
+        // Append to the messages list (after the last message)
+        UI.elements.messagesList.appendChild(container);
+        UI.scrollToBottom();
+    },
+
+    /**
+     * Handle filter button click
+     */
+    _handleFilterClick(btn, label, cardType, isSubFilter, container) {
+        // Mark button as active, deactivate siblings
+        container.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        this._activeFilters.push(label);
+
+        const config = this.cardConfigs[cardType];
+
+        // Check if there are sub-filters for this selection
+        if (!isSubFilter && config.subFilters && config.subFilters[label]) {
+            const sub = config.subFilters[label];
+
+            // Remove any existing sub-filter rows
+            UI.elements.messagesList.querySelectorAll('.filter-buttons-row[data-sub-filter="true"]').forEach(el => el.remove());
+
+            // Show sub-filter row
+            this._renderFilterButtons(sub.options, cardType, true);
+
+            // If there's a followUp prompt, set it in the input after sub-selection
+            if (sub.followUp) {
+                this._pendingFollowUp = sub.followUp;
+            }
+        } else if (isSubFilter && this._pendingFollowUp) {
+            // Sub-filter selected — show followUp as assistant message
+            const followUpMsg = {
+                id: Date.now(),
+                role: 'assistant',
+                content: this._pendingFollowUp,
+                timestamp: new Date().toISOString()
+            };
+            UI.appendMessage(followUpMsg, true);
+            this._pendingFollowUp = null;
+
+            // Pre-fill input with context
+            const filterContext = this._activeFilters.join(' → ');
+            UI.elements.messageInput.value = '';
+            UI.elements.messageInput.focus();
+            UI.elements.messageInput.placeholder = filterContext + ' — escribe tu búsqueda...';
+        } else {
+            // Final filter selected (no sub-filters) — put in input
+            const filterContext = this._activeFilters.join(' → ');
+            UI.elements.messageInput.value = '';
+            UI.elements.messageInput.focus();
+            UI.elements.messageInput.placeholder = filterContext + ' — escribe tu consulta...';
+        }
+    },
+
+    _pendingFollowUp: null,
 
     /**
      * Enviar mensaje

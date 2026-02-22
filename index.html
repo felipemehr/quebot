@@ -101,48 +101,70 @@
                     <div class="welcome-screen" id="welcomeScreen">
                         <!-- Hero -->
                         <div class="hero-section">
-                            <h1 class="hero-title">Cuéntale a QueBot lo que necesitas.<br>El resto se resuelve.</h1>
-                            <p class="hero-subtitle">Analiza, busca, compara y ordena tu problema. Cuando hace falta, lo escala a una persona real con todo el contexto listo.</p>
+                            <h1 class="hero-title">QueBot — Search. Strategy. Action.</h1>
+                            <p class="hero-subtitle">Decisiones con evidencia.</p>
                         </div>
 
-                        <!-- Block A: Quick Actions -->
+                        <!-- Block A: Quick Actions — 5 Vertical Cards -->
                         <div class="dashboard-section">
                             <div class="quick-actions-grid">
-                                <button class="action-card" data-card-type="property" data-prompt="Busca propiedades en la zona que me interesa" data-default-prompt="Busca propiedades en la zona que me interesa">
+                                <button class="action-card" data-card-type="news">
+                                    <div class="action-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                            <path d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2"/>
+                                        </svg>
+                                    </div>
+                                    <div class="action-card-content">
+                                        <span class="action-card-label">Noticias</span>
+                                        <span class="action-card-desc">Resumen con fuentes reales</span>
+                                    </div>
+                                </button>
+                                <button class="action-card" data-card-type="prices">
+                                    <div class="action-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                            <polyline points="22,7 13.5,15.5 8.5,10.5 2,17"/>
+                                            <polyline points="16,7 22,7 22,13"/>
+                                        </svg>
+                                    </div>
+                                    <div class="action-card-content">
+                                        <span class="action-card-label">Mercados</span>
+                                        <span class="action-card-desc">Dólar, UF, euro en tiempo real</span>
+                                    </div>
+                                </button>
+                                <button class="action-card" data-card-type="property">
                                     <div class="action-card-icon">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                                             <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
                                             <circle cx="12" cy="10" r="3"/>
                                         </svg>
                                     </div>
-                                    <span class="action-card-label">Buscar propiedades</span>
+                                    <div class="action-card-content">
+                                        <span class="action-card-label">Propiedades</span>
+                                        <span class="action-card-desc">Búsqueda de propiedades reales</span>
+                                    </div>
                                 </button>
-                                <button class="action-card" data-card-type="prices" data-prompt="Compara precios del dólar, UF y euro en Chile" data-default-prompt="Compara precios del dólar, UF y euro en Chile">
+                                <button class="action-card" data-card-type="analysis">
                                     <div class="action-card-icon">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                            <path d="M18 20V10"/>
-                                            <path d="M12 20V4"/>
-                                            <path d="M6 20v-6"/>
+                                            <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                                         </svg>
                                     </div>
-                                    <span class="action-card-label">Comparar precios</span>
-                                </button>
-                                <button class="action-card" data-card-type="news" data-prompt="Noticias de Chile hoy" data-default-prompt="Noticias de Chile hoy">
-                                    <div class="action-card-icon">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                            <path d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2"/>
-                                        </svg>
+                                    <div class="action-card-content">
+                                        <span class="action-card-label">Análisis</span>
+                                        <span class="action-card-desc">Datos, comparación, estrategia</span>
                                     </div>
-                                    <span class="action-card-label">Noticias y contexto</span>
                                 </button>
-                                <button class="action-card" data-card-type="code" data-prompt="Ayúdame a analizar datos o escribir código" data-default-prompt="Ayúdame a analizar datos o escribir código">
+                                <button class="action-card" data-card-type="code">
                                     <div class="action-card-icon">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                                             <polyline points="16,18 22,12 16,6"/>
                                             <polyline points="8,6 2,12 8,18"/>
                                         </svg>
                                     </div>
-                                    <span class="action-card-label">Programación y análisis</span>
+                                    <div class="action-card-content">
+                                        <span class="action-card-label">Código</span>
+                                        <span class="action-card-desc">Debug, refactor, nuevo código</span>
+                                    </div>
                                 </button>
                             </div>
                         </div>
@@ -180,10 +202,10 @@
                         <div class="dashboard-section">
                             <h2 class="section-title">Qué puedes hacer con QueBot</h2>
                             <div class="capabilities-list">
-                                <div class="capability-item">Autos y propiedades</div>
-                                <div class="capability-item">Viajes y experiencias</div>
-                                <div class="capability-item">Servicios profesionales</div>
-                                <div class="capability-item">Preguntas raras (bienvenidas)</div>
+                                <div class="capability-item">Propiedades con datos verificados</div>
+                                <div class="capability-item">Noticias y análisis financiero</div>
+                                <div class="capability-item">Código y análisis de datos</div>
+                                <div class="capability-item">Consultas legales (9 leyes chilenas)</div>
                             </div>
                         </div>
                     </div>
