@@ -763,17 +763,36 @@ function renderExplorer() {
                         const label = labels[key] || key;
                         let display;
 
-                        // Array of objects with name/value property → pill badges
-                        if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object') {
+                        // Arrays → render each element as a pill, handling mixed types
+                        if (Array.isArray(value) && value.length > 0) {
                             display = value.map(item => {
-                                const itemName = item.name || item.value || item.label || Object.values(item).find(v => typeof v === 'string') || JSON.stringify(item);
-                                const conf = item.confidence !== undefined ? item.confidence : (item.weight !== undefined ? item.weight / 10 : null);
-                                return renderPill(itemName, conf, item.mentions);
-                            }).join('');
-                        }
-                        // Array of strings → pill badges
-                        else if (Array.isArray(value) && value.length > 0) {
-                            display = value.map(v => renderPill(String(v))).join('');
+                                if (typeof item === 'string') {
+                                    // Could be a plain string or a JSON string
+                                    try {
+                                        const parsed = JSON.parse(item);
+                                        if (typeof parsed === 'object' && parsed !== null) {
+                                            const n = parsed.name || parsed.value || parsed.label;
+                                            if (n) {
+                                                const c = parsed.confidence !== undefined ? parsed.confidence : (parsed.weight !== undefined ? parsed.weight / 10 : null);
+                                                return renderPill(n, c, parsed.mentions);
+                                            }
+                                        }
+                                    } catch(e) {}
+                                    return renderPill(item);
+                                } else if (typeof item === 'object' && item !== null) {
+                                    const itemName = item.name || item.value || item.label || null;
+                                    if (itemName) {
+                                        const conf = item.confidence !== undefined ? item.confidence : (item.weight !== undefined ? item.weight / 10 : null);
+                                        return renderPill(itemName, conf, item.mentions);
+                                    }
+                                    // Object without name — skip metadata-only objects
+                                    const meaningful = Object.keys(item).filter(k => !skipFields.includes(k) && k !== 'weight' && k !== 'mentions' && k !== 'confidence');
+                                    if (meaningful.length === 0) return '';
+                                    return renderPill(meaningful.map(k => k + ': ' + item[k]).join(', '));
+                                }
+                                return renderPill(String(item));
+                            }).filter(x => x).join('');
+                            if (!display) display = '<span style="color:#9ca3af;font-size:11px">Sin datos</span>';
                         }
                         // Behavioral signals → special format
                         else if (key === 'behavioral_signals' && typeof value === 'object') {
