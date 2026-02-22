@@ -23,7 +23,7 @@
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <div class="logo">
+                <div class="logo" style="cursor:pointer" onclick="if(typeof App!=='undefined') App.newChat(); else location.reload();" title="Nueva conversación">
                     <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 2L2 7l10 5 10-5-10-5z"/>
                         <path d="M2 17l10 5 10-5"/>

@@ -669,7 +669,7 @@ function renderExplorer() {
         html += '</div>';
         
         // Two-column layout: cases | messages
-        html += '<div style="display:grid;grid-template-columns:1fr 2fr;gap:16px;min-height:300px">';
+        html += '<div style="display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:16px;min-height:300px">';
         
         // Cases column
         html += '<div class="explorer-panel"><h4>📋 Casos (' + userCases.length + ')</h4>';
@@ -714,6 +714,184 @@ function renderExplorer() {
             }
         } else {
             html += '<p style="color:#aaa">← Selecciona un caso para ver mensajes</p>';
+        }
+        html += '</div>';
+        
+        // Profile column
+        html += '<div class="explorer-panel" style="background:#f7f8fa;border-radius:10px;padding:16px;overflow-y:auto;max-height:600px">';
+        html += '<h4>👤 Perfil de usuario</h4>';
+        if (user) {
+            const sp = user.search_profile;
+            if (sp && sp !== '-') {
+                html += '<div style="margin-top:8px">';
+                html += '<h5 style="color:#1F3A5F;margin:0 0 8px;font-size:13px">🔍 Perfil de búsqueda</h5>';
+                try {
+                    const profile = typeof sp === 'string' ? JSON.parse(sp) : sp;
+                    const labels = {
+                        locations: '📍 Ubicaciones',
+                        property_types: '🏠 Tipos',
+                        bedrooms: '🛏️ Dormitorios',
+                        bathrooms: '🚿 Baños',
+                        budget: '💰 Presupuesto',
+                        min_area_m2: '📐 Área mín (m²)',
+                        purpose: '🎯 Propósito',
+                        family_info: '👨‍👩‍👧 Familia',
+                        key_requirements: '📋 Requisitos',
+                        interests: '⭐ Intereses',
+                        top_searches: '🔍 Top búsquedas',
+                        behavioral_signals: '📊 Comportamiento',
+                        profile_confidence_score: '🎯 Confianza'
+                    };
+                    for (const [key, value] of Object.entries(profile)) {
+                        if (key === 'updated_at' || key === 'last_sanitized' || key === 'profile_version') continue;
+                        const label = labels[key] || key;
+                        let display;
+                        if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0].name) {
+                            display = value.map(item => {
+                                const conf = item.confidence !== undefined ? (item.confidence * 100).toFixed(0) : '?';
+                                const mentions = item.mentions || 1;
+                                const confColor = conf >= 70 ? '#10b981' : conf >= 40 ? '#f59e0b' : '#ef4444';
+                                return '<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 6px;background:#fff;border-radius:10px;font-size:11px;border:1px solid #e5e7eb">'
+                                    + item.name
+                                    + ' <span style="color:' + confColor + ';font-size:10px">' + conf + '%</span>'
+                                    + ' <span style="color:#9ca3af;font-size:9px">(' + mentions + 'x)</span>'
+                                    + '</span>';
+                            }).join('');
+                        } else if (key === 'behavioral_signals' && typeof value === 'object') {
+                            const dom = value.dominant_intent || '-';
+                            const pct = value.dominant_pct || 0;
+                            const dist = value.intent_distribution || {};
+                            display = '<strong style="font-size:12px">' + dom + '</strong> (' + pct + '%)';
+                            display += '<div style="font-size:10px;color:#6b7280;margin-top:2px">';
+                            for (const [intent, count] of Object.entries(dist)) {
+                                display += intent + ': ' + count + ' | ';
+                            }
+                            display = display.replace(/ \| $/, '') + '</div>';
+                        } else if (key === 'profile_confidence_score') {
+                            const score = parseFloat(value);
+                            const barColor = score >= 0.7 ? '#10b981' : score >= 0.4 ? '#f59e0b' : '#ef4444';
+                            display = '<div style="display:flex;align-items:center;gap:6px">'
+                                + '<div style="width:80px;height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden">'
+                                + '<div style="width:' + (score*100) + '%;height:100%;background:' + barColor + ';border-radius:3px"></div>'
+                                + '</div>'
+                                + '<span style="font-size:11px">' + (score*100).toFixed(0) + '%</span></div>';
+                        } else if (key === 'budget' && typeof value === 'object') {
+                            const min = value.min || 0;
+                            const max = value.max || 0;
+                            const unit = value.unit || 'UF';
+                            const conf = value.confidence ? ' (' + (value.confidence*100).toFixed(0) + '%)' : '';
+                            display = (min ? min + ' - ' : 'hasta ') + max.toLocaleString() + ' ' + unit + conf;
+                        } else if (Array.isArray(value)) {
+                            display = value.join(', ');
+                        } else if (typeof value === 'object') {
+                            display = JSON.stringify(value);
+                        } else {
+                            display = String(value);
+                        }
+                        html += '<div style="margin-bottom:8px"><div style="font-size:11px;color:#6b7280;font-weight:600">' + label + '</div><div style="font-size:12px;margin-top:2px">' + display + '</div></div>';
+                    }
+                } catch(e) {
+                    html += '<div style="font-size:12px;color:#888">Error al parsear perfil: ' + sp.substring(0, 200) + '</div>';
+                }
+                html += '</div>';
+
+                // Activity summary from messages
+                html += '<h5 style="color:#1F3A5F;margin:16px 0 8px;font-size:13px">📊 Resumen de actividad</h5>';
+                html += '<div style="font-size:12px;color:#555">';
+                html += '<div style="margin-bottom:4px">📝 <strong>' + userCases.length + '</strong> casos</div>';
+                html += '<div style="margin-bottom:4px">💬 <strong>' + userMsgs.length + '</strong> mensajes totales</div>';
+                const userOnlyMsgs = userMsgs.filter(m => m.role === 'user');
+                html += '<div style="margin-bottom:4px">👤 <strong>' + userOnlyMsgs.length + '</strong> mensajes del usuario</div>';
+                if (userCases.length > 0) {
+                    const firstCase = userCases[userCases.length - 1];
+                    const lastCase = userCases[0];
+                    html += '<div style="margin-bottom:4px">📅 Primer caso: ' + (firstCase.created_at || '-') + '</div>';
+                    html += '<div style="margin-bottom:4px">📅 Último caso: ' + (lastCase.created_at || '-') + '</div>';
+                }
+                html += '</div>';
+
+                // Detected interests from user messages
+                html += '<h5 style="color:#1F3A5F;margin:16px 0 8px;font-size:13px">🔎 Intereses detectados</h5>';
+                html += '<div style="font-size:11px;color:#555">';
+                const userTexts = userMsgs.filter(m => m.role === 'user').map(m => (m.text || '').toLowerCase());
+                const keywords = {};
+                const patterns = [
+                    {re: /departamento|depto|dpto/g, label: '🏢 Departamentos'},
+                    {re: /casa/g, label: '🏠 Casas'},
+                    {re: /arriendo|arrendar|alquiler/g, label: '📋 Arriendo'},
+                    {re: /compra|comprar|venta/g, label: '💰 Compra/Venta'},
+                    {re: /dormitorio|pieza|habitaci/g, label: '🛏️ Dormitorios'},
+                    {re: /terraza|balc[oó]n|jard[ií]n/g, label: '🌿 Exterior'},
+                    {re: /estacionamiento|parking|garage/g, label: '🚗 Estacionamiento'},
+                    {re: /mascota|pet friendly|perro|gato/g, label: '🐾 Mascotas'},
+                    {re: /piscina|gym|gimnasio/g, label: '🏊 Amenities'},
+                    {re: /metro|transporte|cercano/g, label: '🚇 Transporte'},
+                    {re: /precio|uf|pesos|\$/g, label: '💵 Precio'},
+                    {re: /familia|hijo|niño/g, label: '👨‍👩‍👧 Familiar'},
+                    {re: /providencia|las condes|ñuñoa|santiago centro|vitacura|la florida|macul|peñalol/g, label: '📍 Comunas RM'},
+                    {re: /viña|valparaiso|concepci[oó]n|temuco|serena/g, label: '📍 Regiones'}
+                ];
+                userTexts.forEach(t => {
+                    patterns.forEach(p => {
+                        const matches = t.match(p.re);
+                        if (matches) keywords[p.label] = (keywords[p.label] || 0) + matches.length;
+                    });
+                });
+                const sortedKeywords = Object.entries(keywords).sort((a,b) => b[1] - a[1]);
+                if (sortedKeywords.length > 0) {
+                    sortedKeywords.forEach(([label, count]) => {
+                        html += '<span style="display:inline-block;margin:2px 3px;padding:2px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:10px">' + label + ' <strong>' + count + '</strong></span>';
+                    });
+                } else {
+                    html += '<span style="color:#aaa">Sin patrones detectados aún</span>';
+                }
+                html += '</div>';
+
+            } else {
+                html += '<div style="text-align:center;padding:20px;color:#aaa;font-size:13px">';
+                html += '<div style="font-size:32px;margin-bottom:8px">🤖</div>';
+                html += '<p>Este usuario aún no tiene perfil.<br>Se construirá automáticamente a medida que use QueBot.</p>';
+                html += '</div>';
+
+                // Still show activity and interests even without profile
+                html += '<h5 style="color:#1F3A5F;margin:16px 0 8px;font-size:13px">📊 Resumen de actividad</h5>';
+                html += '<div style="font-size:12px;color:#555">';
+                html += '<div style="margin-bottom:4px">📝 <strong>' + userCases.length + '</strong> casos</div>';
+                html += '<div style="margin-bottom:4px">💬 <strong>' + userMsgs.length + '</strong> mensajes totales</div>';
+                html += '</div>';
+
+                html += '<h5 style="color:#1F3A5F;margin:16px 0 8px;font-size:13px">🔎 Intereses detectados</h5>';
+                html += '<div style="font-size:11px;color:#555">';
+                const userTextsNp = userMsgs.filter(m => m.role === 'user').map(m => (m.text || '').toLowerCase());
+                const keywordsNp = {};
+                const patternsNp = [
+                    {re: /departamento|depto|dpto/g, label: '🏢 Departamentos'},
+                    {re: /casa/g, label: '🏠 Casas'},
+                    {re: /arriendo|arrendar|alquiler/g, label: '📋 Arriendo'},
+                    {re: /compra|comprar|venta/g, label: '💰 Compra/Venta'},
+                    {re: /dormitorio|pieza|habitaci/g, label: '🛏️ Dormitorios'},
+                    {re: /terraza|balc[oó]n|jard[ií]n/g, label: '🌿 Exterior'},
+                    {re: /estacionamiento|parking|garage/g, label: '🚗 Estacionamiento'},
+                    {re: /mascota|pet friendly|perro|gato/g, label: '🐾 Mascotas'},
+                    {re: /precio|uf|pesos|\$/g, label: '💵 Precio'},
+                    {re: /providencia|las condes|ñuñoa|santiago centro|vitacura/g, label: '📍 Comunas RM'}
+                ];
+                userTextsNp.forEach(t => {
+                    patternsNp.forEach(p => {
+                        const matches = t.match(p.re);
+                        if (matches) keywordsNp[p.label] = (keywordsNp[p.label] || 0) + matches.length;
+                    });
+                });
+                const sortedNp = Object.entries(keywordsNp).sort((a,b) => b[1] - a[1]);
+                if (sortedNp.length > 0) {
+                    sortedNp.forEach(([label, count]) => {
+                        html += '<span style="display:inline-block;margin:2px 3px;padding:2px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:10px">' + label + ' <strong>' + count + '</strong></span>';
+                    });
+                } else {
+                    html += '<span style="color:#aaa">Sin patrones detectados aún</span>';
+                }
+                html += '</div>';
+            }
         }
         html += '</div>';
         

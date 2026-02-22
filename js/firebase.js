@@ -26,6 +26,7 @@ function getQueBotEnvironment() {
   if (host.includes('quebot-production')) return 'production';
   if (host.includes('spirited-purpose')) return 'staging';
   if (host.includes('localhost') || host.includes('127.0.0.1')) return 'local';
+  if (host.includes('charming-embrace')) return 'lab';
   if (host.includes('lab')) return 'lab';
   return 'unknown';
 }
