@@ -127,6 +127,42 @@ $authenticated = isset($_SESSION['admin_auth']) && $_SESSION['admin_auth'] === t
         
         .detail-link { color: #1F3A5F; cursor: pointer; text-decoration: underline; }
         
+
+        /* Explorer */
+        .explorer { padding: 16px 0; }
+        .explorer-row { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+        .explorer-select { 
+            flex: 1; min-width: 250px;
+        }
+        .explorer-select label { display: block; font-size: 12px; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+        .explorer-select select {
+            width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px;
+            font-size: 14px; background: white; cursor: pointer;
+        }
+        .explorer-panel {
+            background: white; border-radius: 10px; padding: 20px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 16px;
+        }
+        .explorer-panel h4 { color: #1F3A5F; margin-bottom: 12px; font-size: 15px; }
+        .explorer-panel .case-card {
+            border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px;
+            margin-bottom: 8px; cursor: pointer; transition: all 0.15s;
+        }
+        .explorer-panel .case-card:hover { background: #f7f8fa; border-color: #1F3A5F; }
+        .explorer-panel .case-card.selected { background: #eef2ff; border-color: #1F3A5F; }
+        .explorer-panel .case-meta { font-size: 12px; color: #888; margin-top: 4px; }
+        .explorer-panel .case-title { font-weight: 600; color: #1a1a2e; }
+        .explorer-msgs { max-height: 500px; overflow-y: auto; }
+        .explorer-msg { margin: 8px 0; padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.6; }
+        .explorer-msg.user { background: rgba(31,58,95,0.08); margin-left: 40px; }
+        .explorer-msg.assistant { background: #f7f8fa; margin-right: 40px; }
+        .explorer-msg .role { font-weight: 600; font-size: 12px; text-transform: uppercase; color: #1F3A5F; }
+        .explorer-msg .time { font-size: 11px; color: #999; margin-top: 4px; }
+        .explorer-msg .text-content { margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+        .user-summary { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+        .user-summary .item { background: #f7f8fa; padding: 8px 14px; border-radius: 8px; font-size: 13px; }
+        .user-summary .item strong { color: #1F3A5F; }
+
         /* Modal */
         .modal-overlay {
             display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
@@ -188,6 +224,7 @@ $authenticated = isset($_SESSION['admin_auth']) && $_SESSION['admin_auth'] === t
         <button class="tab" onclick="showTab('users')">Usuarios</button>
         <button class="tab" onclick="showTab('messages')">Mensajes</button>
         <button class="tab" onclick="showTab('runs')">Runs</button>
+        <button class="tab" onclick="showTab('explorer')">👤 Explorador</button>
     </div>
     <div class="table-wrap" id="table-container">
         <div class="loading">Cargando datos...</div>
@@ -308,6 +345,7 @@ function showTab(tab) {
 }
 
 function renderTable() {
+    if (currentTab === 'explorer') { renderExplorer(); return; }
     const data = filterByEnv(allData[currentTab]);
     const container = document.getElementById('table-container');
     
@@ -583,6 +621,126 @@ function showProfile(userId) {
     html += '</div>';
     body.innerHTML = html;
     modal.classList.add('show');
+}
+
+
+
+// === EXPLORER TAB ===
+let selectedUserId = null;
+let selectedCaseId = null;
+
+function renderExplorer() {
+    const container = document.getElementById('table-container');
+    const users = filterByEnv(allData.users).sort((a,b) => {
+        const na = a.display_name || a.email || a.id;
+        const nb = b.display_name || b.email || b.id;
+        return na.localeCompare(nb);
+    });
+    
+    let html = '<div class="explorer">';
+    
+    // User selector
+    html += '<div class="explorer-row">';
+    html += '<div class="explorer-select"><label>Seleccionar usuario</label>';
+    html += '<select onchange="selectExplorerUser(this.value)"><option value="">-- Elegir usuario --</option>';
+    users.forEach(u => {
+        const label = (u.display_name || u.email || u.id.substring(0,12) + '...') + 
+            (u.email && u.display_name ? ' (' + u.email + ')' : '') +
+            ((!u.email && !u.display_name) ? ' [Anónimo]' : '');
+        const sel = selectedUserId === u.id ? ' selected' : '';
+        html += '<option value="' + u.id + '"' + sel + '>' + label + '</option>';
+    });
+    html += '</select></div></div>';
+    
+    if (selectedUserId) {
+        const user = allData.users.find(u => u.id === selectedUserId);
+        const userCases = filterByEnv(allData.cases).filter(c => c.user_id === selectedUserId)
+            .sort((a,b) => (b.created_at || '').localeCompare(a.created_at || ''));
+        const userMsgs = allData.messages.filter(m => userCases.some(c => c.id === m.case_id));
+        
+        // User summary
+        html += '<div class="user-summary">';
+        html += '<div class="item"><strong>Tipo:</strong> ' + (user && (user.auth_provider === 'google.com' || (user.email && user.email.includes('@'))) ? '🟢 Google' : '🟡 Anónimo') + '</div>';
+        if (user && user.email) html += '<div class="item"><strong>Email:</strong> ' + user.email + '</div>';
+        if (user && user.display_name) html += '<div class="item"><strong>Nombre:</strong> ' + user.display_name + '</div>';
+        html += '<div class="item"><strong>Casos:</strong> ' + userCases.length + '</div>';
+        html += '<div class="item"><strong>Mensajes:</strong> ' + userMsgs.length + '</div>';
+        if (user && user.last_seen_at) html += '<div class="item"><strong>Última visita:</strong> ' + user.last_seen_at + '</div>';
+        html += '</div>';
+        
+        // Two-column layout: cases | messages
+        html += '<div style="display:grid;grid-template-columns:1fr 2fr;gap:16px;min-height:300px">';
+        
+        // Cases column
+        html += '<div class="explorer-panel"><h4>📋 Casos (' + userCases.length + ')</h4>';
+        if (userCases.length === 0) {
+            html += '<p style="color:#aaa">Sin casos</p>';
+        } else {
+            userCases.forEach(c => {
+                const sel = selectedCaseId === c.id ? ' selected' : '';
+                const msgCount = allData.messages.filter(m => m.case_id === c.id).length;
+                const firstMsg = allData.messages.filter(m => m.case_id === c.id && m.role === 'user').sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''))[0];
+                const preview = firstMsg ? (firstMsg.text || '').substring(0, 60) : 'Sin mensajes';
+                html += '<div class="case-card' + sel + '" onclick="selectExplorerCase(\'' + c.id + '\')">';
+                html += '<div class="case-title">' + (c.vertical || 'general') + ' · ' + msgCount + ' msgs</div>';
+                html += '<div class="case-meta">' + (c.status === 'open' ? '🟢' : '🔴') + ' ' + (c.created_at || '-') + '</div>';
+                html += '<div class="case-meta" style="color:#555">' + preview + (preview.length >= 60 ? '...' : '') + '</div>';
+                html += '</div>';
+            });
+        }
+        html += '</div>';
+        
+        // Messages column
+        html += '<div class="explorer-panel"><h4>💬 Mensajes</h4>';
+        if (selectedCaseId) {
+            const caseMsgs = allData.messages
+                .filter(m => m.case_id === selectedCaseId)
+                .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+            
+            if (caseMsgs.length === 0) {
+                html += '<p style="color:#aaa">Sin mensajes en este caso</p>';
+            } else {
+                html += '<div class="explorer-msgs">';
+                caseMsgs.forEach(m => {
+                    const role = m.role || 'user';
+                    const text = (m.text || '').substring(0, 1000);
+                    html += '<div class="explorer-msg ' + role + '">';
+                    html += '<div class="role">' + role + '</div>';
+                    html += '<div class="text-content">' + escapeHtml(text) + (text.length >= 1000 ? '...' : '') + '</div>';
+                    html += '<div class="time">' + (m.created_at || '-') + '</div>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+        } else {
+            html += '<p style="color:#aaa">← Selecciona un caso para ver mensajes</p>';
+        }
+        html += '</div>';
+        
+        html += '</div>'; // grid end
+    } else {
+        html += '<div class="explorer-panel"><p style="color:#aaa;text-align:center;padding:40px">Selecciona un usuario para explorar sus casos y mensajes</p></div>';
+    }
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function selectExplorerUser(userId) {
+    selectedUserId = userId || null;
+    selectedCaseId = null;
+    renderExplorer();
+}
+
+function selectExplorerCase(caseId) {
+    selectedCaseId = caseId;
+    renderExplorer();
 }
 
 loadAll();
