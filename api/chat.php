@@ -793,7 +793,9 @@ try {
     if ($profileBuilder->shouldExtract($message)) {
         $profileStart = microtime(true);
         $currentVertical = $searchVertical ?? ($vertical ?? null);
-        $profileUpdate = $profileBuilder->extractProfile($message, $reply, $userProfile, $currentVertical);
+        // Pass detected mode to ProfileBuilder for contamination prevention
+        $profileMode = $detectedMode ?? $currentVertical;
+        $profileUpdate = $profileBuilder->extractProfile($message, $reply, $userProfile, $profileMode);
         $profileTimingMs = round((microtime(true) - $profileStart) * 1000);
         if ($profileUpdate) {
             error_log("ProfileBuilder: Profile updated (" . count(array_filter($profileUpdate, fn($v) => $v !== null && $v !== [])) . " fields) in {$profileTimingMs}ms");

@@ -101,10 +101,12 @@ class ProfileBuilder {
             $hasDirectFilter = false; // Never treat button clicks as strong signals
         }
 
-        // NEWS_MODE: skip location extraction entirely
-        $isNewsMode = ($currentMode === 'news');
+        // Mode-aware extraction: skip location extraction in non-property modes
+        $isNewsMode = ($currentMode === 'news' || $currentMode === 'NEWS_MODE');
+        $isFinancialMode = ($currentMode === 'financial' || $currentMode === 'FINANCIAL_MODE');
+        $isNonPropertyMode = $isNewsMode || $isFinancialMode || $currentMode === 'DEV_MODE';
 
-        $prompt = $this->buildExtractionPrompt($userMessage, $existingJson, $hasDirectFilter, $isButton, $isNewsMode);
+        $prompt = $this->buildExtractionPrompt($userMessage, $existingJson, $hasDirectFilter, $isButton, $isNonPropertyMode);
 
         $requestData = [
             'model' => $this->model,
@@ -157,9 +159,15 @@ class ProfileBuilder {
         $tokens = $result['usage'] ?? [];
         error_log("ProfileBuilder v2: tokens in=" . ($tokens['input_tokens'] ?? 0) . " out=" . ($tokens['output_tokens'] ?? 0));
 
-        // NEWS_MODE safeguard: strip any locations that slipped through
-        if ($isNewsMode) {
+        // Non-property mode safeguard: strip any locations/property data that slipped through
+        if ($isNonPropertyMode) {
             unset($extracted['locations']);
+            unset($extracted['property_types']);
+            unset($extracted['preferred_regions']);
+            unset($extracted['bedrooms']);
+            unset($extracted['bathrooms']);
+            unset($extracted['budget']);
+            unset($extracted['min_area_m2']);
         }
 
         // Weighted merge
@@ -169,13 +177,14 @@ class ProfileBuilder {
     /**
      * Build the extraction prompt — ONLY user-declared preferences.
      */
-    private function buildExtractionPrompt(string $userMessage, string $existingJson, bool $hasDirectFilter, bool $isButton = false, bool $isNewsMode = false): string {
+    private function buildExtractionPrompt(string $userMessage, string $existingJson, bool $hasDirectFilter, bool $isButton = false, bool $isNonPropertyMode = false): string {
         $prompt = "Analiza SOLO el mensaje del USUARIO. Extrae preferencias EXPLÍCITAS que el usuario declara.\n\n";
         
-        if ($isNewsMode) {
-            $prompt .= "⚠️ ATENCIÓN: Este mensaje es una CONSULTA DE NOTICIAS (NEWS_MODE).\n";
-            $prompt .= "NO extraigas ubicaciones (locations) de este mensaje — las ciudades/países mencionados son contexto noticioso, NO preferencias de búsqueda inmobiliaria.\n";
-            $prompt .= "Solo extrae interests si aplica (ej: 'noticias'). locations DEBE ser vacío [].\n\n";
+        if ($isNonPropertyMode) {
+            $prompt .= "⚠️ ATENCIÓN: Este mensaje NO es una búsqueda inmobiliaria.\n";
+            $prompt .= "NO extraigas ubicaciones (locations), property_types, budget, bedrooms, ni bathrooms.\n";
+            $prompt .= "Las ciudades/países mencionados son contexto informativo, NO preferencias de búsqueda inmobiliaria.\n";
+            $prompt .= "Solo extrae interests si aplica. locations, property_types y preferred_regions DEBEN ser vacíos [].\n\n";
         }
 
         if ($isButton) {
@@ -205,6 +214,9 @@ class ProfileBuilder {
         $prompt .= "  \"budget\": {\"min\": 0, \"max\": 0, \"unit\": \"UF\"},\n";
         $prompt .= "  \"min_area_m2\": null,\n";
         $prompt .= "  \"purpose\": \"inversión|uso personal|arriendo|null\",\n";
+        $prompt .= "  \"investment_style\": \"conservador|moderado|agresivo|null\",\n";
+        $prompt .= "  \"risk_profile\": \"bajo|medio|alto|null\",\n";
+        $prompt .= "  \"preferred_regions\": [\"Araucanía\",\"Metropolitana\",\"Los Lagos\"],\n";
         $prompt .= "  \"interests\": [\"propiedades\",\"legal\",\"noticias\",\"retail\",\"finanzas\"],\n";
         $prompt .= "  \"key_requirements\": [\"requisitos explícitos del usuario\"],\n";
         $prompt .= "  \"family_info\": null,\n";
@@ -212,6 +224,9 @@ class ProfileBuilder {
         $prompt .= "}\n\n";
         $prompt .= "Sin info nueva del USUARIO → responde: {}\n";
         $prompt .= "IMPORTANTE: 'busco parcela en Temuco' = preferencia. 'qué pasa con el mercado en Santiago' = NO preferencia.\n";
+        $prompt .= "investment_style: solo si el usuario indica perfil de inversión (ej: 'algo seguro' → conservador, 'alta rentabilidad' → agresivo)\n";
+        $prompt .= "risk_profile: solo si el usuario menciona riesgo o seguridad de inversión\n";
+        $prompt .= "preferred_regions: extraer solo si el usuario menciona regiones (ej: 'sur de Chile' → Los Lagos, Araucanía)\n";
 
         return $prompt;
     }
@@ -243,12 +258,13 @@ class ProfileBuilder {
      * New schema for array fields:
      * locations: [{"name": "Temuco", "confidence": 0.95, "mentions": 8, "weight": 9.5}]
      * property_types: [{"name": "parcela", "confidence": 0.8, "mentions": 4, "weight": 8}]
+     * preferred_regions: [{"name": "Araucanía", "confidence": 0.6, "mentions": 2, "weight": 4}]
      */
     private function weightedMerge(array $existing, array $extracted, bool $isDirectFilter): array {
         $merged = $existing;
 
         // === Weighted array fields ===
-        $arrayFields = ['locations', 'property_types', 'interests', 'key_requirements'];
+        $arrayFields = ['locations', 'property_types', 'interests', 'key_requirements', 'preferred_regions'];
         foreach ($arrayFields as $field) {
             if (empty($extracted[$field]) || !is_array($extracted[$field])) continue;
             
@@ -301,7 +317,7 @@ class ProfileBuilder {
         }
 
         // === Scalar fields (overwrite if new) ===
-        $scalarFields = ['bedrooms', 'bathrooms', 'min_area_m2', 'purpose', 'family_info'];
+        $scalarFields = ['bedrooms', 'bathrooms', 'min_area_m2', 'purpose', 'family_info', 'investment_style', 'risk_profile'];
         foreach ($scalarFields as $field) {
             if (isset($extracted[$field]) && $extracted[$field] !== null) {
                 $merged[$field] = $extracted[$field];
@@ -500,7 +516,7 @@ class ProfileBuilder {
      * Called periodically (nightly or on load).
      */
     public function sanitizeProfile(array $profile): array {
-        $arrayFields = ['locations', 'property_types', 'interests', 'key_requirements'];
+        $arrayFields = ['locations', 'property_types', 'interests', 'key_requirements', 'preferred_regions'];
         
         foreach ($arrayFields as $field) {
             $items = $profile[$field] ?? [];
