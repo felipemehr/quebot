@@ -124,6 +124,19 @@ $authenticated = isset($_SESSION['admin_auth']) && $_SESSION['admin_auth'] === t
         
         .loading { text-align: center; padding: 40px; color: #888; }
         .empty { text-align: center; padding: 40px; color: #aaa; }
+
+        /* Observability */
+        .obs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 20px; }
+        .obs-panel { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .obs-panel h4 { color: #1F3A5F; margin-bottom: 12px; }
+        .obs-bar { height: 24px; background: #e0e0e0; border-radius: 12px; overflow: hidden; margin: 4px 0; }
+        .obs-bar-fill { height: 100%; background: linear-gradient(90deg, #1F3A5F, #4a7fb5); border-radius: 12px; transition: width 0.5s; display: flex; align-items: center; padding-left: 8px; color: white; font-size: 12px; min-width: 0; }
+        .obs-label-row { display: flex; justify-content: space-between; font-size: 12px; color: #555; margin-top: 6px; }
+        .obs-stat-big { font-size: 28px; font-weight: 700; color: #1F3A5F; }
+        .obs-stat-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+        .obs-stat-row { display: flex; gap: 24px; margin-bottom: 16px; }
+        .obs-stat-item { text-align: center; flex: 1; }
+        .obs-no-data { text-align: center; padding: 30px; color: #aaa; font-size: 14px; }
         
         .detail-link { color: #1F3A5F; cursor: pointer; text-decoration: underline; }
         
@@ -225,6 +238,7 @@ $authenticated = isset($_SESSION['admin_auth']) && $_SESSION['admin_auth'] === t
         <button class="tab" onclick="showTab('messages')">Mensajes</button>
         <button class="tab" onclick="showTab('runs')">Runs</button>
         <button class="tab" onclick="showTab('explorer')">👤 Explorador</button>
+        <button class="tab" onclick="showTab('observability')">📊 Observabilidad</button>
     </div>
     <div class="table-wrap" id="table-container">
         <div class="loading">Cargando datos...</div>
@@ -245,7 +259,7 @@ const API_KEY = 'AIzaSyC2Ud-lC4jnCQIwA5QyufVczfiovGHZRXI';
 const PROJECT = 'quebot-2d931';
 const BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents`;
 
-let allData = { cases: [], users: [], messages: [], runs: [] };
+let allData = { cases: [], users: [], messages: [], runs: [], events: [] };
 let currentTab = 'cases';
 
 let envFilter = 'all';
@@ -332,7 +346,14 @@ async function loadAll() {
         fetchCollection('messages'),
         fetchCollection('runs')
     ]);
-    allData = { cases, users, messages, runs };
+    // Load events separately (may not exist yet, so handle gracefully)
+    let events = [];
+    try {
+        events = await fetchCollection('events');
+    } catch(e) {
+        console.log('Events collection not available:', e);
+    }
+    allData = { cases, users, messages, runs, events };
     
     updateStats();
     renderTable();
@@ -347,6 +368,7 @@ function showTab(tab) {
 
 function renderTable() {
     if (currentTab === 'explorer') { renderExplorer(); return; }
+    if (currentTab === 'observability') { renderObservability(); return; }
     const data = filterByEnv(allData[currentTab]);
     const container = document.getElementById('table-container');
     
@@ -982,6 +1004,300 @@ function selectExplorerUser(userId) {
 function selectExplorerCase(caseId) {
     selectedCaseId = caseId;
     renderExplorer();
+}
+
+// === OBSERVABILITY TAB ===
+function renderObservability() {
+    const container = document.getElementById('table-container');
+    const cases = filterByEnv(allData.cases);
+    const users = filterByEnv(allData.users);
+    const runs = filterByEnv(allData.runs);
+    const events = filterByEnv(allData.events || []);
+    const messages = filterByEnv(allData.messages);
+
+    let html = '<div class="obs-grid">';
+
+    // === Panel 1: Mode Routing Stats ===
+    html += '<div class="obs-panel">';
+    html += '<h4>🧭 Ruteo por Modo</h4>';
+    const modeCounts = {};
+    const knownModes = ['REAL_ESTATE', 'NEWS', 'FINANCIAL', 'LEGAL', 'DEV', 'GENERAL'];
+    knownModes.forEach(m => modeCounts[m] = 0);
+
+    // Try to extract mode from cases (search_audit.detected_mode or vertical)
+    cases.forEach(c => {
+        // search_audit may be a parsed object with detected_mode
+        const sa = c.search_audit;
+        let mode = null;
+        if (sa && typeof sa === 'object' && sa.detected_mode) {
+            mode = sa.detected_mode;
+        } else if (sa && typeof sa === 'object' && sa.mode) {
+            mode = sa.mode;
+        }
+        // Fallback: use vertical field mapped to mode
+        if (!mode && c.vertical) {
+            const vMap = { 'inmobiliaria': 'REAL_ESTATE', 'real_estate': 'REAL_ESTATE', 'noticias': 'NEWS', 'news': 'NEWS', 'finanzas': 'FINANCIAL', 'financial': 'FINANCIAL', 'legal': 'LEGAL', 'dev': 'DEV' };
+            mode = vMap[c.vertical.toLowerCase()] || 'GENERAL';
+        }
+        if (mode) {
+            const upperMode = mode.toUpperCase();
+            modeCounts[upperMode] = (modeCounts[upperMode] || 0) + 1;
+        }
+    });
+
+    // Also try events for mode info
+    events.forEach(e => {
+        if (e.detected_mode) {
+            const upperMode = e.detected_mode.toUpperCase();
+            modeCounts[upperMode] = (modeCounts[upperMode] || 0) + 1;
+        }
+    });
+
+    const totalModes = Object.values(modeCounts).reduce((a, b) => a + b, 0);
+    if (totalModes === 0) {
+        html += '<div class="obs-no-data">📭 No hay datos de ruteo aún.<br><small>Los datos aparecerán cuando se procesen búsquedas con el nuevo pipeline.</small></div>';
+    } else {
+        const maxMode = Math.max(...Object.values(modeCounts), 1);
+        const modeLabels = { 'REAL_ESTATE': '🏠 Inmobiliaria', 'NEWS': '📰 Noticias', 'FINANCIAL': '💹 Finanzas', 'LEGAL': '⚖️ Legal', 'DEV': '💻 Dev', 'GENERAL': '🌐 General' };
+        for (const [mode, count] of Object.entries(modeCounts)) {
+            if (count === 0) continue;
+            const pct = (count / maxMode) * 100;
+            const label = modeLabels[mode] || mode;
+            html += '<div class="obs-label-row"><span>' + label + '</span><span><strong>' + count + '</strong> (' + ((count/totalModes)*100).toFixed(0) + '%)</span></div>';
+            html += '<div class="obs-bar"><div class="obs-bar-fill" style="width:' + pct + '%">' + (pct > 15 ? count : '') + '</div></div>';
+        }
+        html += '<div style="margin-top:12px;font-size:11px;color:#999">Total: ' + totalModes + ' casos con modo detectado</div>';
+    }
+    html += '</div>';
+
+    // === Panel 2: Search Classification Stats ===
+    html += '<div class="obs-panel">';
+    html += '<h4>🔍 Clasificación de Búsquedas</h4>';
+
+    let totalSearches = 0;
+    let searchesWithResults = 0;
+    let zeroResultSearches = 0;
+    const classificationCounts = { 'PROPERTY_DETAIL': 0, 'LISTING_PAGE': 0, 'IRRELEVANT': 0 };
+
+    // Extract from cases search_audit
+    cases.forEach(c => {
+        const sa = c.search_audit;
+        if (sa && typeof sa === 'object') {
+            if (sa.total_searches !== undefined) {
+                totalSearches += (typeof sa.total_searches === 'number' ? sa.total_searches : parseInt(sa.total_searches) || 0);
+            }
+            if (sa.results_found !== undefined) {
+                searchesWithResults += (typeof sa.results_found === 'number' ? sa.results_found : parseInt(sa.results_found) || 0);
+            }
+            if (sa.zero_results !== undefined) {
+                zeroResultSearches += (typeof sa.zero_results === 'number' ? sa.zero_results : parseInt(sa.zero_results) || 0);
+            }
+            // Classification breakdown
+            if (sa.classifications && typeof sa.classifications === 'object') {
+                for (const [cls, cnt] of Object.entries(sa.classifications)) {
+                    const upperCls = cls.toUpperCase();
+                    classificationCounts[upperCls] = (classificationCounts[upperCls] || 0) + (typeof cnt === 'number' ? cnt : parseInt(cnt) || 0);
+                }
+            }
+            // Also check individual classification
+            if (sa.classification) {
+                const upperCls = sa.classification.toUpperCase();
+                classificationCounts[upperCls] = (classificationCounts[upperCls] || 0) + 1;
+            }
+        }
+    });
+
+    // Also check runs for search metadata
+    runs.forEach(r => {
+        if (r.searched || (r.result_flags && r.result_flags.searched)) {
+            totalSearches++;
+            // Can't determine results easily from runs, so just count searches
+        }
+    });
+
+    // Also check events
+    events.forEach(e => {
+        if (e.type === 'search_completed') {
+            totalSearches++;
+            if (e.results_count && parseInt(e.results_count) > 0) {
+                searchesWithResults++;
+            } else {
+                zeroResultSearches++;
+            }
+            if (e.classification) {
+                const upperCls = e.classification.toUpperCase();
+                classificationCounts[upperCls] = (classificationCounts[upperCls] || 0) + 1;
+            }
+        }
+    });
+
+    if (totalSearches === 0) {
+        html += '<div class="obs-no-data">📭 No hay datos de búsqueda aún.<br><small>Los datos aparecerán cuando se procesen búsquedas con el nuevo pipeline.</small></div>';
+    } else {
+        html += '<div class="obs-stat-row">';
+        html += '<div class="obs-stat-item"><div class="obs-stat-big">' + totalSearches + '</div><div class="obs-stat-label">Total Búsquedas</div></div>';
+        html += '<div class="obs-stat-item"><div class="obs-stat-big" style="color:#10b981">' + searchesWithResults + '</div><div class="obs-stat-label">Con Resultados</div></div>';
+        html += '<div class="obs-stat-item"><div class="obs-stat-big" style="color:#ef4444">' + zeroResultSearches + '</div><div class="obs-stat-label">Sin Resultados</div></div>';
+        html += '</div>';
+
+        const totalCls = Object.values(classificationCounts).reduce((a, b) => a + b, 0);
+        if (totalCls > 0) {
+            html += '<h5 style="color:#555;font-size:12px;margin:12px 0 8px">Clasificación de páginas</h5>';
+            const maxCls = Math.max(...Object.values(classificationCounts), 1);
+            const clsLabels = { 'PROPERTY_DETAIL': '🏠 Detalle Propiedad', 'LISTING_PAGE': '📋 Listado', 'IRRELEVANT': '❌ Irrelevante' };
+            for (const [cls, count] of Object.entries(classificationCounts)) {
+                if (count === 0) continue;
+                const pct = (count / maxCls) * 100;
+                const label = clsLabels[cls] || cls;
+                html += '<div class="obs-label-row"><span>' + label + '</span><span><strong>' + count + '</strong> (' + ((count/totalCls)*100).toFixed(0) + '%)</span></div>';
+                html += '<div class="obs-bar"><div class="obs-bar-fill" style="width:' + pct + '%;' + (cls === 'IRRELEVANT' ? 'background:linear-gradient(90deg,#ef4444,#f87171)' : '') + '">' + (pct > 15 ? count : '') + '</div></div>';
+            }
+        }
+    }
+    html += '</div>';
+
+    // === Panel 3: Profile Field Updates ===
+    html += '<div class="obs-panel">';
+    html += '<h4>👤 Campos de Perfil Poblados</h4>';
+
+    const profileFields = ['budget', 'property_types', 'locations', 'preferred_regions', 'investment_style', 'risk_profile'];
+    const profileLabels = {
+        'budget': '💰 Presupuesto',
+        'property_types': '🏠 Tipos propiedad',
+        'locations': '📍 Ubicaciones',
+        'preferred_regions': '🌎 Regiones preferidas',
+        'investment_style': '📈 Estilo inversión',
+        'risk_profile': '⚖️ Perfil de riesgo'
+    };
+
+    const totalUsers = users.length;
+    const fieldCounts = {};
+    profileFields.forEach(f => fieldCounts[f] = 0);
+
+    users.forEach(u => {
+        const sp = u.search_profile;
+        if (sp && typeof sp === 'object' && sp !== '-') {
+            const profile = sp;
+            profileFields.forEach(field => {
+                const val = profile[field];
+                if (val !== undefined && val !== null && val !== '' && val !== '-') {
+                    // Check for empty arrays and empty objects
+                    if (Array.isArray(val) && val.length === 0) return;
+                    if (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0) return;
+                    fieldCounts[field]++;
+                }
+            });
+        }
+    });
+
+    if (totalUsers === 0) {
+        html += '<div class="obs-no-data">📭 No hay usuarios registrados.</div>';
+    } else {
+        const anyProfileData = Object.values(fieldCounts).some(c => c > 0);
+        if (!anyProfileData) {
+            html += '<div class="obs-no-data">📭 Ningún usuario tiene perfil poblado aún.<br><small>' + totalUsers + ' usuarios registrados. Los perfiles se construyen automáticamente.</small></div>';
+        } else {
+            profileFields.forEach(field => {
+                const count = fieldCounts[field];
+                const pct = totalUsers > 0 ? (count / totalUsers) * 100 : 0;
+                const label = profileLabels[field] || field;
+                html += '<div class="obs-label-row"><span>' + label + '</span><span>' + count + '/' + totalUsers + ' (' + pct.toFixed(0) + '%)</span></div>';
+                html += '<div class="obs-bar"><div class="obs-bar-fill" style="width:' + pct + '%;' + (pct === 0 ? 'min-width:2px;background:#ccc' : '') + '">' + (pct > 15 ? pct.toFixed(0) + '%' : '') + '</div></div>';
+            });
+        }
+    }
+    html += '</div>';
+
+    // === Panel 4: Extractor Success Rate ===
+    html += '<div class="obs-panel">';
+    html += '<h4>⚙️ Tasa de Éxito del Extractor</h4>';
+
+    let extractorCalls = 0;
+    let extractorSuccess = 0;
+    let extractorFail = 0;
+
+    // Check cases for extraction audit data
+    cases.forEach(c => {
+        const sa = c.search_audit;
+        if (sa && typeof sa === 'object') {
+            if (sa.extractor_calls !== undefined) {
+                extractorCalls += (typeof sa.extractor_calls === 'number' ? sa.extractor_calls : parseInt(sa.extractor_calls) || 0);
+            }
+            if (sa.extractor_success !== undefined) {
+                extractorSuccess += (typeof sa.extractor_success === 'number' ? sa.extractor_success : parseInt(sa.extractor_success) || 0);
+            }
+            if (sa.extractor_fail !== undefined) {
+                extractorFail += (typeof sa.extractor_fail === 'number' ? sa.extractor_fail : parseInt(sa.extractor_fail) || 0);
+            }
+            // Also check pi_extractor fields
+            if (sa.pi_extractor_calls !== undefined) {
+                extractorCalls += (typeof sa.pi_extractor_calls === 'number' ? sa.pi_extractor_calls : parseInt(sa.pi_extractor_calls) || 0);
+            }
+            if (sa.pi_extractor_success !== undefined) {
+                extractorSuccess += (typeof sa.pi_extractor_success === 'number' ? sa.pi_extractor_success : parseInt(sa.pi_extractor_success) || 0);
+            }
+        }
+    });
+
+    // Check events for extraction events
+    events.forEach(e => {
+        if (e.type === 'extraction_completed' || e.type === 'pi_extraction') {
+            extractorCalls++;
+            if (e.success === true || e.success === '✅' || e.status === 'success') {
+                extractorSuccess++;
+            } else {
+                extractorFail++;
+            }
+        }
+    });
+
+    // Check runs for extraction metadata
+    runs.forEach(r => {
+        if (r.result_flags && typeof r.result_flags === 'object') {
+            if (r.result_flags.pi_extracted !== undefined) {
+                extractorCalls++;
+                if (r.result_flags.pi_extracted) {
+                    extractorSuccess++;
+                } else {
+                    extractorFail++;
+                }
+            }
+        }
+    });
+
+    if (extractorCalls === 0) {
+        html += '<div class="obs-no-data">📭 No hay datos de extracción aún.<br><small>Los datos aparecerán cuando el PI Extractor procese propiedades.</small></div>';
+    } else {
+        if (extractorFail === 0 && extractorSuccess === 0 && extractorCalls > 0) {
+            extractorSuccess = extractorCalls; // Assume success if only calls tracked
+        }
+        if (extractorFail === 0) extractorFail = extractorCalls - extractorSuccess;
+
+        const successRate = extractorCalls > 0 ? (extractorSuccess / extractorCalls) * 100 : 0;
+        const failRate = extractorCalls > 0 ? (extractorFail / extractorCalls) * 100 : 0;
+        const rateColor = successRate >= 80 ? '#10b981' : successRate >= 50 ? '#f59e0b' : '#ef4444';
+
+        html += '<div style="text-align:center;margin-bottom:16px">';
+        html += '<div class="obs-stat-big" style="color:' + rateColor + '">' + successRate.toFixed(1) + '%</div>';
+        html += '<div class="obs-stat-label">Tasa de Éxito</div>';
+        html += '</div>';
+
+        html += '<div class="obs-stat-row">';
+        html += '<div class="obs-stat-item"><div class="obs-stat-big" style="font-size:22px">' + extractorCalls + '</div><div class="obs-stat-label">Total Llamadas</div></div>';
+        html += '<div class="obs-stat-item"><div class="obs-stat-big" style="font-size:22px;color:#10b981">' + extractorSuccess + '</div><div class="obs-stat-label">Exitosas</div></div>';
+        html += '<div class="obs-stat-item"><div class="obs-stat-big" style="font-size:22px;color:#ef4444">' + extractorFail + '</div><div class="obs-stat-label">Fallidas</div></div>';
+        html += '</div>';
+
+        // Success/Fail bar
+        html += '<div class="obs-label-row"><span>✅ Exitosas</span><span>' + successRate.toFixed(0) + '%</span></div>';
+        html += '<div class="obs-bar"><div class="obs-bar-fill" style="width:' + successRate + '%;background:linear-gradient(90deg,#10b981,#34d399)">' + (successRate > 15 ? extractorSuccess : '') + '</div></div>';
+        html += '<div class="obs-label-row"><span>❌ Fallidas</span><span>' + failRate.toFixed(0) + '%</span></div>';
+        html += '<div class="obs-bar"><div class="obs-bar-fill" style="width:' + failRate + '%;background:linear-gradient(90deg,#ef4444,#f87171)">' + (failRate > 15 ? extractorFail : '') + '</div></div>';
+    }
+    html += '</div>';
+
+    html += '</div>'; // close obs-grid
+    container.innerHTML = html;
 }
 
 loadAll();
