@@ -528,6 +528,7 @@ if ($shouldSearch) {
             'max_results' => 10,
             'scrape_pages' => $isPropertyQuery ? 5 : 3,
             'scrape_max_length' => $isPropertyQuery ? 5000 : 3000,
+            'user_profile' => $userProfile,
         ];
 
         $searchResult = $orchestrator->search($searchQuery, $vertical, $options);

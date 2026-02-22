@@ -624,4 +624,80 @@ class IntentParser {
 
         return null;
     }
+
+
+    /**
+     * Resolve "mi zona" / "zona que me interesa" references using user profile.
+     * Returns resolved location if profile has high-confidence zone, null otherwise.
+     */
+    public static function resolveProfileLocation(array $intent, ?array $profile): ?array {
+        if (empty($profile)) return null;
+        
+        // Check if query references user's zone
+        $zonaRefs = [
+            'mi zona', 'mi sector', 'mi barrio', 'mi ciudad',
+            'zona que me interesa', 'sector que me interesa',
+            'donde busco', 'donde estoy buscando',
+            'la zona', 'mi lugar', 'cerca de donde vivo',
+            'misma zona', 'mismo sector', 'mismo lugar'
+        ];
+        
+        // Already has explicit location? Don't override
+        if (!empty($intent['ubicacion'])) return null;
+        
+        // Check raw query for zone references
+        $queryLower = strtolower($intent['_raw_query'] ?? '');
+        $hasZoneRef = false;
+        foreach ($zonaRefs as $ref) {
+            if (strpos($queryLower, $ref) !== false) {
+                $hasZoneRef = true;
+                break;
+            }
+        }
+        
+        // Also trigger if query has NO location at all (use profile as default)
+        $noLocation = empty($intent['ubicacion']) && empty($intent['zona_texto']);
+        
+        if (!$hasZoneRef && !$noLocation) return null;
+        
+        // Get best location from profile
+        $locations = $profile['locations'] ?? [];
+        if (empty($locations)) return null;
+        
+        // v2 format: array of {name, confidence, mentions, weight}
+        if (is_array($locations[0] ?? null) || is_object($locations[0] ?? null)) {
+            // Sort by weight/confidence desc
+            usort($locations, function($a, $b) {
+                $wa = is_array($a) ? ($a['weight'] ?? 0) : ($a->weight ?? 0);
+                $wb = is_array($b) ? ($b['weight'] ?? 0) : ($b->weight ?? 0);
+                return $wb - $wa;
+            });
+            
+            $best = $locations[0];
+            $bestName = is_array($best) ? ($best['name'] ?? '') : ($best->name ?? '');
+            $bestConf = is_array($best) ? ($best['confidence'] ?? 0) : ($best->confidence ?? 0);
+            
+            // Only use if confidence >= 0.5
+            if ($bestConf >= 0.5 && !empty($bestName)) {
+                return [
+                    'ubicacion' => $bestName,
+                    'from_profile' => true,
+                    'confidence' => $bestConf,
+                    'has_zone_ref' => $hasZoneRef,
+                ];
+            }
+        } 
+        // v1 format: simple array of strings
+        elseif (is_string($locations[0] ?? null)) {
+            return [
+                'ubicacion' => $locations[0],
+                'from_profile' => true,
+                'confidence' => 0.6,
+                'has_zone_ref' => $hasZoneRef,
+            ];
+        }
+        
+        return null;
+    }
+
 }

@@ -21,6 +21,7 @@ require_once __DIR__ . '/QueryBuilder.php';
 require_once __DIR__ . '/DomainPolicy.php';
 require_once __DIR__ . '/Validator.php';
 require_once __DIR__ . '/HeuristicRanker.php';
+require_once __DIR__ . '/UrlHealthChecker.php';
 require_once __DIR__ . '/LLMReranker.php';
 require_once __DIR__ . '/SearchCache.php';
 require_once __DIR__ . '/CandidateValidator.php';
@@ -98,6 +99,27 @@ class SearchOrchestrator {
         $cleanedQuery = $queryData['cleaned_query'];
         $intent = $queryData['intent'] ?? null;
         $contextQueries = $queryData['context_queries'] ?? [];
+
+        // Step 1.5: Resolve profile-based location if query has no explicit location
+        $userProfile = $options['user_profile'] ?? null;
+        if ($intent && $userProfile && $vertical === 'real_estate') {
+            $intent['_raw_query'] = $userMessage;
+            $profileLoc = IntentParser::resolveProfileLocation($intent, $userProfile);
+            if ($profileLoc) {
+                $intent['ubicacion'] = $profileLoc['ubicacion'];
+                $intent['ubicacion_raw'] = strtolower($profileLoc['ubicacion']);
+                $intent['ubicacion_from_profile'] = true;
+                $intent['profile_confidence'] = $profileLoc['confidence'];
+                
+                // Rebuild queries with resolved location
+                $queryData = QueryBuilder::build($userMessage . ' en ' . $profileLoc['ubicacion'], $vertical);
+                $queries = $queryData['queries'];
+                $cleanedQuery = $queryData['cleaned_query'];
+                $contextQueries = $queryData['context_queries'] ?? [];
+                
+                $this->emitProgress('profile_location', 'Usando tu zona: ' . $profileLoc['ubicacion'] . ' (perfil ' . round($profileLoc['confidence'] * 100) . '%)');
+            }
+        }
 
         // SSE: Emit intent parsed
         $intentSummary = $this->summarizeIntent($intent, $vertical);
@@ -223,6 +245,67 @@ class SearchOrchestrator {
 
         $this->emitProgress('scrape_done', $scraped . ' páginas extraídas');
 
+        // Step 6.5: Post-scrape validation — detect listing pages disguised as specific
+        if ($vertical === 'real_estate') {
+            $reclassified = 0;
+            foreach ($ranked as &$r) {
+                $scrapedContent = $r['scraped_content'] ?? '';
+                $originalType = $r['extracted']['url_type'] ?? 'unknown';
+                
+                if (!empty($scrapedContent) && $originalType === 'specific') {
+                    // Detect listing page indicators in scraped content
+                    $listingIndicators = [
+                        'resultados en',
+                        'propiedades encontradas',
+                        'propiedades en venta',
+                        'propiedades en arriendo',
+                        'Ordenar por',
+                        'Filtrar por',
+                        'Ver más propiedades',
+                        'Siguiente página',
+                        'mostrando resultados',
+                        '+9.999',
+                        'redirectedFromVip',
+                    ];
+                    
+                    $indicatorCount = 0;
+                    $contentLower = strtolower($scrapedContent);
+                    foreach ($listingIndicators as $indicator) {
+                        if (strpos($contentLower, strtolower($indicator)) !== false) {
+                            $indicatorCount++;
+                        }
+                    }
+                    
+                    // If 2+ listing indicators found, reclassify as listing
+                    if ($indicatorCount >= 2) {
+                        $r['extracted']['url_type'] = 'listing';
+                        $r['type'] = 'listing';
+                        $r['reclassified_from'] = 'specific';
+                        $r['reclassification_reason'] = 'post_scrape_listing_detected';
+                        $reclassified++;
+                    }
+                    
+                    // Also check: if scraped content has multiple price listings (3+), it's likely a listing page
+                    $priceMatches = preg_match_all('/(?:UF|\$)\s*[\d\.]+/i', $scrapedContent);
+                    if ($priceMatches >= 5 && $originalType === 'specific') {
+                        // Many prices = listing page
+                        if (!isset($r['reclassified_from'])) {
+                            $r['extracted']['url_type'] = 'listing';
+                            $r['type'] = 'listing';
+                            $r['reclassified_from'] = 'specific';
+                            $r['reclassification_reason'] = 'multiple_prices_detected';
+                            $reclassified++;
+                        }
+                    }
+                }
+            }
+            unset($r);
+            
+            if ($reclassified > 0) {
+                $this->emitProgress('post_scrape_validation', $reclassified . ' URLs reclasificadas (listing detectado en contenido)');
+            }
+        }
+
         // Step 7: Re-rank after scraping
         $ranked = HeuristicRanker::rank($ranked, $cleanedQuery, $vertical, $intent ?? []);
 
@@ -263,6 +346,43 @@ class SearchOrchestrator {
             $softCount = count($filterResult['soft_failed']);
             $hardCount = count($filterResult['hard_failed']);
             $this->emitProgress('validated', "{$passedCount} pasan, {$softCount} parciales, {$hardCount} descartados");
+        }
+
+
+        // Step 9.5: URL Health Check — verify URLs are alive before presenting
+        if ($vertical === 'real_estate' && !empty($filteredForLLM)) {
+            $urlsToCheck = [];
+            foreach ($filteredForLLM as $r) {
+                if (!empty($r['url']) && ($r['type'] ?? '') === 'specific') {
+                    $urlsToCheck[] = $r['url'];
+                }
+            }
+            
+            if (!empty($urlsToCheck)) {
+                $this->emitProgress('health_check', 'Verificando ' . count($urlsToCheck) . ' URLs...');
+                $healthResults = UrlHealthChecker::checkBatch($urlsToCheck, 4);
+                
+                $deadCount = 0;
+                foreach ($filteredForLLM as &$r) {
+                    $url = $r['url'] ?? '';
+                    if (isset($healthResults[$url]) && !$healthResults[$url]['alive']) {
+                        $r['url_dead'] = true;
+                        $r['url_dead_reason'] = $healthResults[$url]['reason'];
+                        $deadCount++;
+                    }
+                }
+                unset($r);
+                
+                // Remove dead URLs from results
+                if ($deadCount > 0) {
+                    $filteredForLLM = array_values(array_filter($filteredForLLM, function($r) {
+                        return empty($r['url_dead']);
+                    }));
+                    $this->emitProgress('health_done', $deadCount . ' URLs muertas eliminadas, ' . count($filteredForLLM) . ' válidas');
+                } else {
+                    $this->emitProgress('health_done', 'Todas las URLs verificadas ✓');
+                }
+            }
         }
 
         // Step 10: Count valid listings
