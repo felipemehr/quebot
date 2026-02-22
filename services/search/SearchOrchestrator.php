@@ -572,6 +572,25 @@ class SearchOrchestrator {
         $modeResult = ModeRouter::route($userMessage, $vertical);
         $mode = $modeResult['mode'];
 
+        // Build classification stats for observability
+        $classificationStats = ['PROPERTY_DETAIL' => 0, 'LISTING_PAGE' => 0, 'IRRELEVANT' => 0, 'INFO' => 0, 'BLOCKED' => 0];
+        foreach ($ranked as $r) {
+            $cls = $r['classification'] ?? 'INFO';
+            $classificationStats[$cls] = ($classificationStats[$cls] ?? 0) + 1;
+        }
+        // Count PI extractions
+        $piExtractions = ['attempted' => 0, 'success' => 0, 'failed' => 0];
+        foreach ($ranked as $r) {
+            if (isset($r['pi_extracted'])) {
+                $piExtractions['attempted']++;
+                if (!empty($r['pi_extracted']['price_uf']) || !empty($r['pi_extracted']['title'])) {
+                    $piExtractions['success']++;
+                } else {
+                    $piExtractions['failed']++;
+                }
+            }
+        }
+
         $response = [
             'results' => $this->cleanResultsForOutput($filteredForLLM),
             'vertical' => $vertical,
@@ -591,6 +610,14 @@ class SearchOrchestrator {
             'context_for_llm' => $contextForLLM,
             'valid_urls' => $validURLs,
             'timing_ms' => round((microtime(true) - $startTime) * 1000, 1),
+            'classification_stats' => $classificationStats,
+            'pi_extractions' => $piExtractions,
+            'stats' => [
+                'total_candidates' => count($ranked),
+                'passed' => count($filteredForLLM),
+                'partial' => $filterResult ? ($filterResult['stats']['partial'] ?? 0) : 0,
+                'discarded' => $filterResult ? ($filterResult['stats']['hard_failed'] ?? 0) : 0,
+            ],
         ];
 
         if (!empty($filteredForLLM)) {

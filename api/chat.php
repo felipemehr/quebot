@@ -587,14 +587,33 @@ if ($shouldSearch) {
             
             // Update case with search metadata
             if ($caseId && $searchIntent) {
-                FirestoreAudit::updateCaseSearchMeta($caseId, [
+                $searchMeta = [
                     'vertical' => $searchVertical,
                     'location' => $searchIntent['ubicacion'] ?? '',
                     'property_type' => $searchIntent['tipo_propiedad'] ?? '',
                     'budget' => !empty($searchIntent['presupuesto']) 
                         ? $searchIntent['presupuesto']['raw'] ?? '' 
                         : '',
-                ]);
+                ];
+                // Add mode and classification stats for observability
+                if (isset($detectedMode)) {
+                    $searchMeta['detected_mode'] = $detectedMode;
+                }
+                if (isset($searchResult['classification_stats'])) {
+                    $searchMeta['classification_stats'] = $searchResult['classification_stats'];
+                }
+                if (isset($searchResult['pi_extractions'])) {
+                    $searchMeta['pi_extractions'] = $searchResult['pi_extractions'];
+                }
+                if (isset($searchResult['stats'])) {
+                    $searchMeta['search_result_stats'] = [
+                        'total_candidates' => $searchResult['stats']['total_candidates'] ?? 0,
+                        'passed' => $searchResult['stats']['passed'] ?? 0,
+                        'partial' => $searchResult['stats']['partial'] ?? 0,
+                        'discarded' => $searchResult['stats']['discarded'] ?? 0,
+                    ];
+                }
+                FirestoreAudit::updateCaseSearchMeta($caseId, $searchMeta);
             }
         } catch (\Throwable $e) {
             error_log("FirestoreAudit error: " . $e->getMessage());

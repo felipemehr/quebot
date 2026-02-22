@@ -1092,17 +1092,30 @@ function renderObservability() {
             if (sa.zero_results !== undefined) {
                 zeroResultSearches += (typeof sa.zero_results === 'number' ? sa.zero_results : parseInt(sa.zero_results) || 0);
             }
-            // Classification breakdown
+            // Classification breakdown from new format
+            if (sa.classification_stats && typeof sa.classification_stats === 'object') {
+                for (const [cls, cnt] of Object.entries(sa.classification_stats)) {
+                    const upperCls = cls.toUpperCase();
+                    classificationCounts[upperCls] = (classificationCounts[upperCls] || 0) + (typeof cnt === 'number' ? cnt : parseInt(cnt) || 0);
+                }
+            }
+            // Legacy format
             if (sa.classifications && typeof sa.classifications === 'object') {
                 for (const [cls, cnt] of Object.entries(sa.classifications)) {
                     const upperCls = cls.toUpperCase();
                     classificationCounts[upperCls] = (classificationCounts[upperCls] || 0) + (typeof cnt === 'number' ? cnt : parseInt(cnt) || 0);
                 }
             }
-            // Also check individual classification
             if (sa.classification) {
                 const upperCls = sa.classification.toUpperCase();
                 classificationCounts[upperCls] = (classificationCounts[upperCls] || 0) + 1;
+            }
+            // Count total from search_result_stats
+            if (sa.search_result_stats) {
+                const srs = sa.search_result_stats;
+                totalSearches++;
+                if (srs.passed > 0) searchesWithResults++;
+                else zeroResultSearches++;
             }
         }
     });
@@ -1235,6 +1248,12 @@ function renderObservability() {
             }
             if (sa.pi_extractor_success !== undefined) {
                 extractorSuccess += (typeof sa.pi_extractor_success === 'number' ? sa.pi_extractor_success : parseInt(sa.pi_extractor_success) || 0);
+            }
+            // New format: pi_extractions object {attempted, success, failed}
+            if (sa.pi_extractions && typeof sa.pi_extractions === 'object') {
+                extractorCalls += (parseInt(sa.pi_extractions.attempted) || 0);
+                extractorSuccess += (parseInt(sa.pi_extractions.success) || 0);
+                extractorFail += (parseInt(sa.pi_extractions.failed) || 0);
             }
         }
     });
