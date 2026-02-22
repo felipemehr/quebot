@@ -17,6 +17,8 @@
  */
 
 require_once __DIR__ . '/IntentParser.php';
+require_once __DIR__ . '/../../config/news_sources.php';
+require_once __DIR__ . '/../FirestoreAudit.php';
 require_once __DIR__ . '/QueryBuilder.php';
 require_once __DIR__ . '/DomainPolicy.php';
 require_once __DIR__ . '/Validator.php';
@@ -121,6 +123,29 @@ class SearchOrchestrator {
             }
         }
 
+        // === NEWS_MODE: Restrict queries to whitelisted news sources ===
+        $isNewsMode = ($vertical === 'news');
+        if ($isNewsMode) {
+            $maxResults = min($maxResults, 8); // NEWS_MODE: max 8 results
+
+            // Detect if query is Chile-focused
+            $queryLower = mb_strtolower($userMessage);
+            $isChileFocused = (bool) preg_match('/\\b(chile|chilen[oa]s?|santiago|gobierno|congreso|boric|senado|cámara)\\b/iu', $queryLower);
+
+            // Build site restriction
+            $siteRestriction = $isChileFocused
+                ? NewsSourceRegistry::buildChileSiteRestriction()
+                : NewsSourceRegistry::buildSiteRestriction();
+
+            // Rewrite queries to include site: operators
+            $newsQueries = [];
+            foreach ($queries as $q) {
+                $newsQueries[] = $q . ' (' . $siteRestriction . ')';
+            }
+            $queries = $newsQueries;
+            $searchQueries = $queries; // Override for parallel search
+        }
+
         // SSE: Emit intent parsed
         $intentSummary = $this->summarizeIntent($intent, $vertical);
         $this->emitProgress('intent_parsed', $intentSummary);
@@ -177,6 +202,45 @@ class SearchOrchestrator {
         }
 
         $this->emitProgress('search_done', count($allResults) . ' resultados de ' . $providerName);
+
+        // === NEWS_MODE: Filter out non-whitelisted domains and log source usage ===
+        if ($isNewsMode && !empty($allResults)) {
+            $beforeCount = count($allResults);
+            $newsSourcesUsed = [];
+
+            $allResults = array_values(array_filter($allResults, function ($r) use (&$newsSourcesUsed) {
+                $url = $r['url'] ?? '';
+                if (NewsSourceRegistry::isWhitelisted($url)) {
+                    $source = NewsSourceRegistry::getSourceByDomain($url);
+                    if ($source) {
+                        $key = $source['domain'];
+                        if (!isset($newsSourcesUsed[$key])) {
+                            $newsSourcesUsed[$key] = $source;
+                        }
+                    }
+                    return true;
+                }
+                return false;
+            }));
+
+            // Limit to max 8 results for news
+            $allResults = array_slice($allResults, 0, 8);
+
+            $afterCount = count($allResults);
+            if ($beforeCount !== $afterCount) {
+                $this->emitProgress('news_filter', "Filtrado: {$afterCount}/{$beforeCount} de fuentes verificadas");
+            }
+
+            // Log news source usage to Firestore
+            foreach ($newsSourcesUsed as $domain => $source) {
+                FirestoreAudit::logEvent('NEWS_SOURCE_USED', [
+                    'source_domain' => $domain,
+                    'source_name' => $source['name'],
+                    'source_type' => $source['type'],
+                    'query' => $userMessage,
+                ]);
+            }
+        }
 
         // Step 3.5: Run context queries in parallel
         $contextResults = [];

@@ -85,7 +85,8 @@ class ProfileBuilder {
     public function extractProfile(
         string $userMessage, 
         string $assistantResponse, 
-        ?array $existingProfile = null
+        ?array $existingProfile = null,
+        ?string $currentMode = null
     ): ?array {
         $existingJson = $existingProfile 
             ? json_encode($this->getProfileSummary($existingProfile), JSON_UNESCAPED_UNICODE) 
@@ -100,7 +101,10 @@ class ProfileBuilder {
             $hasDirectFilter = false; // Never treat button clicks as strong signals
         }
 
-        $prompt = $this->buildExtractionPrompt($userMessage, $existingJson, $hasDirectFilter, $isButton);
+        // NEWS_MODE: skip location extraction entirely
+        $isNewsMode = ($currentMode === 'news');
+
+        $prompt = $this->buildExtractionPrompt($userMessage, $existingJson, $hasDirectFilter, $isButton, $isNewsMode);
 
         $requestData = [
             'model' => $this->model,
@@ -153,6 +157,11 @@ class ProfileBuilder {
         $tokens = $result['usage'] ?? [];
         error_log("ProfileBuilder v2: tokens in=" . ($tokens['input_tokens'] ?? 0) . " out=" . ($tokens['output_tokens'] ?? 0));
 
+        // NEWS_MODE safeguard: strip any locations that slipped through
+        if ($isNewsMode) {
+            unset($extracted['locations']);
+        }
+
         // Weighted merge
         return $this->weightedMerge($existingProfile ?? [], $extracted, $hasDirectFilter);
     }
@@ -160,9 +169,15 @@ class ProfileBuilder {
     /**
      * Build the extraction prompt — ONLY user-declared preferences.
      */
-    private function buildExtractionPrompt(string $userMessage, string $existingJson, bool $hasDirectFilter, bool $isButton = false): string {
+    private function buildExtractionPrompt(string $userMessage, string $existingJson, bool $hasDirectFilter, bool $isButton = false, bool $isNewsMode = false): string {
         $prompt = "Analiza SOLO el mensaje del USUARIO. Extrae preferencias EXPLÍCITAS que el usuario declara.\n\n";
         
+        if ($isNewsMode) {
+            $prompt .= "⚠️ ATENCIÓN: Este mensaje es una CONSULTA DE NOTICIAS (NEWS_MODE).\n";
+            $prompt .= "NO extraigas ubicaciones (locations) de este mensaje — las ciudades/países mencionados son contexto noticioso, NO preferencias de búsqueda inmobiliaria.\n";
+            $prompt .= "Solo extrae interests si aplica (ej: 'noticias'). locations DEBE ser vacío [].\n\n";
+        }
+
         if ($isButton) {
             $prompt .= "⚠️ ATENCIÓN: Este mensaje viene de un BOTÓN PREDEFINIDO (plantilla), NO de texto libre del usuario.\n";
             $prompt .= "NO extraigas ubicaciones ni preferencias de este mensaje — es genérico, no refleja intención real del usuario.\n";

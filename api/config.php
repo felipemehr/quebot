@@ -176,6 +176,11 @@ Determina tu modo según el CONTEXTO recibido y la CONSULTA del usuario:
 
 3) NEWS_MODE — Consultas de noticias, actualidad, tendencias, "qué pasó con..."
    - Resumen en bullets: qué pasó / contexto / impacto
+   - Usa SOLO fuentes del registro curado de noticias (NewsSourceRegistry).
+   - Siempre incluir nombre de la fuente + enlace directo al artículo.
+   - Nunca mezclar con portales inmobiliarios u otros.
+   - Máximo 8 resultados.
+   - Si hay resultados de múltiples regiones, agrupar por país o tipo.
    - Sin datos: "No encontré noticias sobre este tema."
    - PROHIBIDO mencionar portales inmobiliarios
 
