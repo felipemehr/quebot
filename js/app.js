@@ -630,6 +630,11 @@ const App = {
                 this.isProcessing = false;
                 UI.setInputEnabled(true);
                 UI.elements.messageInput.focus();
+
+                // Show quick-reply suggestions based on mode
+                if (metadata && metadata.mode) {
+                    UI.showQuickReplies(metadata.mode, metadata.search_intent);
+                }
             },
             // onError
             (error) => {

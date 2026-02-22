@@ -122,6 +122,10 @@ const API = {
                                 metadata.searched = data.searched || false;
                                 metadata.legal_used = data.legalResults || false;
                                 metadata.profile_update = data.profile_update || null;
+                                metadata.mode = data.mode || null;
+                                metadata.mode_label = data.mode_label || null;
+                                metadata.search_vertical = data.searchVertical || null;
+                                metadata.search_intent = data.search_intent || null;
                                 break;
 
                             case 'error':

@@ -482,6 +482,76 @@ const UI = {
     },
 
     /**
+     * Show quick-reply suggestion buttons after a response
+     */
+    showQuickReplies(mode, searchIntent) {
+        // Remove any existing quick replies
+        document.querySelectorAll('.quick-replies').forEach(el => el.remove());
+
+        const suggestions = this.getQuickReplySuggestions(mode, searchIntent);
+        if (!suggestions || suggestions.length === 0) return;
+
+        const container = document.createElement('div');
+        container.className = 'quick-replies';
+        container.innerHTML = suggestions.map(s => 
+            `<button class="quick-reply-btn" data-text="${this.escapeHtml(s.text)}">${s.icon} ${s.label}</button>`
+        ).join('');
+
+        container.querySelectorAll('.quick-reply-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const text = btn.dataset.text;
+                this.elements.messageInput.value = text;
+                this.elements.messageInput.focus();
+                container.remove();
+                // Auto-send
+                this.elements.messageInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+            });
+        });
+
+        this.elements.messagesList.appendChild(container);
+        this.scrollToBottom();
+    },
+
+    /**
+     * Get mode-specific quick reply suggestions
+     */
+    getQuickReplySuggestions(mode, intent) {
+        const modeMap = {
+            'REAL_ESTATE_MODE': [
+                { icon: '🔍', label: 'Ampliar búsqueda', text: 'Busca en comunas cercanas con presupuesto similar' },
+                { icon: '📊', label: 'Comparar precios', text: '¿Cómo se comparan estos precios con el promedio de la zona?' },
+                { icon: '📐', label: 'Análisis UF/m²', text: 'Calcula el precio por metro cuadrado de cada opción' },
+                { icon: '⚖️', label: 'Pros y contras', text: 'Dame un análisis de pros y contras de las mejores opciones' },
+            ],
+            'FINANCIAL_MODE': [
+                { icon: '📈', label: 'Tendencia', text: '¿Cuál es la tendencia del último mes?' },
+                { icon: '💱', label: 'Tipo de cambio', text: '¿Cuál es el tipo de cambio actual USD/CLP?' },
+                { icon: '📊', label: 'Comparar', text: 'Compara con el mismo período del año pasado' },
+            ],
+            'NEWS_MODE': [
+                { icon: '🌍', label: 'Más noticias', text: 'Dame más noticias sobre este tema' },
+                { icon: '📋', label: 'Resumen', text: 'Resume los puntos clave en 3 bullets' },
+                { icon: '🔮', label: 'Impacto', text: '¿Qué impacto podría tener esto en Chile?' },
+            ],
+            'LEGAL_MODE': [
+                { icon: '📜', label: 'Artículos', text: 'Muéstrame los artículos relevantes del código' },
+                { icon: '⚖️', label: 'Jurisprudencia', text: '¿Hay jurisprudencia relevante sobre este tema?' },
+                { icon: '📋', label: 'Pasos', text: '¿Cuáles son los pasos a seguir?' },
+            ],
+            'DEV_MODE': [
+                { icon: '🔧', label: 'Refactorizar', text: 'Refactoriza este código para mejor legibilidad' },
+                { icon: '🧪', label: 'Tests', text: 'Genera tests unitarios para este código' },
+                { icon: '📖', label: 'Documentar', text: 'Genera documentación para este código' },
+            ]
+        };
+
+        return modeMap[mode] || [
+            { icon: '💡', label: 'Profundizar', text: 'Explícame más sobre esto' },
+            { icon: '📋', label: 'Resumir', text: 'Resume esto en 3 puntos clave' },
+        ];
+    },
+
+    /**
      * Process render commands in content
      */
     processRenderCommands(content) {
