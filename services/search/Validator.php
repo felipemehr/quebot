@@ -170,6 +170,26 @@ class Validator {
             }
         }
 
+        // Portal-specific listing patterns
+        $portalListingPatterns = [
+            // yapo.cl: /region/terrenos is listing, /region/terrenos/terreno-name-123456 is specific
+            '#yapo\\.cl/.+/(terrenos|casas|departamentos|propiedades)/?$#i',
+            // chilepropiedades: /propiedades/venta/terreno/region is listing
+            '#chilepropiedades\\.cl/propiedades/(venta|arriendo)/(casa|departamento|terreno|parcela)/.+#i',
+            // goplaceit: /propiedades/ without ID
+            '#goplaceit\\.com/propiedades/(venta|arriendo)/#i',
+        ];
+
+        foreach ($portalListingPatterns as $p) {
+            if (preg_match($p, $urlLower)) {
+                // But again check for numeric ID — detail pages have format like name-123456
+                if (preg_match('/[-_]\d{6,}/', $path) || preg_match('/\/\d{5,}(\/|$)/', $path)) {
+                    return 'specific';
+                }
+                return 'listing';
+            }
+        }
+
         // Generic category/region paths
         if (preg_match('/\/(category|region|comuna|sector)\//i', $path)) {
             return 'listing';

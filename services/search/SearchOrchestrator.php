@@ -414,6 +414,66 @@ class SearchOrchestrator {
             }
         }
 
+        // Step 6.6: Detect expired/sold/unavailable listings in scraped content
+        $expiredCount = 0;
+        foreach ($ranked as &$r) {
+            $scrapedContent = $r['scraped_content'] ?? '';
+            if (!empty($scrapedContent) && ($r['extracted']['url_type'] ?? '') === 'specific') {
+                $contentLower = mb_strtolower($scrapedContent);
+                $expiredPatterns = [
+                    'publicación no disponible',
+                    'publicación eliminada',
+                    'este aviso ya no está disponible',
+                    'esta publicación ya no existe',
+                    'aviso no encontrado',
+                    'propiedad no encontrada',
+                    'propiedad no disponible',
+                    'la publicación que buscas no existe',
+                    'listing not available',
+                    'este aviso ha sido eliminado',
+                    'este aviso expiró',
+                    'aviso expirado',
+                    'la propiedad fue vendida',
+                    'vendido',
+                    'arrendado',
+                    'publicación pausada',
+                    'publicación finalizada',
+                    'aviso finalizado',
+                    'ya fue vendida',
+                    'ya no está disponible',
+                    'no pudimos encontrar',
+                    'contenido no disponible',
+                    '404',
+                    'página no encontrada',
+                ];
+                
+                $expiredHits = 0;
+                $matchedPatterns = [];
+                foreach ($expiredPatterns as $pattern) {
+                    if (mb_strpos($contentLower, $pattern) !== false) {
+                        $expiredHits++;
+                        $matchedPatterns[] = $pattern;
+                    }
+                }
+                
+                // If ANY expired pattern found, mark as dead
+                if ($expiredHits > 0) {
+                    $r['url_dead'] = true;
+                    $r['url_dead_reason'] = 'expired_content: ' . implode(', ', $matchedPatterns);
+                    $expiredCount++;
+                }
+            }
+        }
+        unset($r);
+
+        if ($expiredCount > 0) {
+            // Remove expired results
+            $ranked = array_values(array_filter($ranked, function($r) {
+                return empty($r['url_dead']);
+            }));
+            $this->emitProgress('expired_check', $expiredCount . ' publicaciones expiradas/eliminadas detectadas y removidas');
+        }
+
         // Step 7: Re-rank after scraping
         $ranked = HeuristicRanker::rank($ranked, $cleanedQuery, $vertical, $intent ?? []);
 
@@ -476,17 +536,19 @@ class SearchOrchestrator {
 
 
         // Step 9.5: URL Health Check — verify URLs are alive before presenting
+        // Enhanced: uses GET with browser UA for property portals, checks content for soft-404
         if ($vertical === 'real_estate' && !empty($filteredForLLM)) {
             $urlsToCheck = [];
             foreach ($filteredForLLM as $r) {
-                if (!empty($r['url']) && ($r['type'] ?? '') === 'specific') {
+                // Only check URLs that weren't already scraped (scraped ones were checked in Step 6.6)
+                if (!empty($r['url']) && ($r['type'] ?? '') === 'specific' && empty($r['scraped_content'])) {
                     $urlsToCheck[] = $r['url'];
                 }
             }
             
             if (!empty($urlsToCheck)) {
-                $this->emitProgress('health_check', 'Verificando ' . count($urlsToCheck) . ' URLs...');
-                $healthResults = UrlHealthChecker::checkBatch($urlsToCheck, 4);
+                $this->emitProgress('health_check', 'Verificando ' . count($urlsToCheck) . ' URLs (con detección de soft-404)...');
+                $healthResults = UrlHealthChecker::checkBatchWithContent($urlsToCheck, 5);
                 
                 $deadCount = 0;
                 foreach ($filteredForLLM as &$r) {
@@ -504,7 +566,7 @@ class SearchOrchestrator {
                     $filteredForLLM = array_values(array_filter($filteredForLLM, function($r) {
                         return empty($r['url_dead']);
                     }));
-                    $this->emitProgress('health_done', $deadCount . ' URLs muertas eliminadas, ' . count($filteredForLLM) . ' válidas');
+                    $this->emitProgress('health_done', $deadCount . ' URLs muertas eliminadas (incl. soft-404), ' . count($filteredForLLM) . ' válidas');
                 } else {
                     $this->emitProgress('health_done', 'Todas las URLs verificadas ✓');
                 }
@@ -1111,7 +1173,7 @@ class SearchOrchestrator {
             if (!empty($ext['bedrooms'])) $detailSignals++;
             if (!empty($ext['latitude'])) $detailSignals++;
             
-            return $detailSignals >= 1 ? 'PROPERTY_DETAIL' : 'PROPERTY_DETAIL'; // Specific URLs are detail by default
+            return $detailSignals >= 1 ? 'PROPERTY_DETAIL' : 'LISTING_PAGE'; // No detail signals = likely listing
         }
         
         if ($urlType === 'listing') {
