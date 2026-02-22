@@ -28,6 +28,8 @@ require_once __DIR__ . '/LLMReranker.php';
 require_once __DIR__ . '/SearchCache.php';
 require_once __DIR__ . '/CandidateValidator.php';
 require_once __DIR__ . '/GeoResolver.php';
+require_once __DIR__ . '/PortalInmobiliarioExtractor.php';
+require_once __DIR__ . '/../ModeRouter.php';
 require_once __DIR__ . '/providers/DuckDuckGoHtmlProvider.php';
 require_once __DIR__ . '/providers/SerpApiProvider.php';
 
@@ -302,6 +304,48 @@ class SearchOrchestrator {
                     $r['scraped_content'] = $content;
                     $r = Validator::extract($r);
                     $scraped++;
+                    
+                    // === PI EXTRACTOR: Deep extraction for Portal Inmobiliario URLs ===
+                    $url = $r['url'] ?? '';
+                    if ($vertical === 'real_estate' && PortalInmobiliarioExtractor::supports($url)) {
+                        try {
+                            // Fetch full HTML for extractor (scrapeContent may truncate)
+                            $fullHtml = $this->fetchFullHtml($url);
+                            if ($fullHtml) {
+                                $extractor = new PortalInmobiliarioExtractor();
+                                $piData = $extractor->extract($fullHtml, $url);
+                                
+                                if (!empty($piData['extraction_success'])) {
+                                    $r['pi_extracted'] = $piData;
+                                    // Enrich the existing extracted data
+                                    $ext = &$r['extracted'];
+                                    if (!empty($piData['price_uf'])) $ext['price_uf'] = $piData['price_uf'];
+                                    if (!empty($piData['price_clp'])) $ext['price_clp'] = $piData['price_clp'];
+                                    if (!empty($piData['latitude'])) $ext['latitude'] = $piData['latitude'];
+                                    if (!empty($piData['longitude'])) $ext['longitude'] = $piData['longitude'];
+                                    if (!empty($piData['surface_total'])) $ext['surface_total'] = $piData['surface_total'];
+                                    if (!empty($piData['bedrooms'])) $ext['bedrooms'] = $piData['bedrooms'];
+                                    if (!empty($piData['bathrooms'])) $ext['bathrooms'] = $piData['bathrooms'];
+                                    if (!empty($piData['parking'])) $ext['parking'] = $piData['parking'];
+                                    if (!empty($piData['city'])) $ext['city'] = $piData['city'];
+                                    if (!empty($piData['region'])) $ext['region'] = $piData['region'];
+                                    if (!empty($piData['seller_name'])) $ext['seller_name'] = $piData['seller_name'];
+                                    if (!empty($piData['photo_count'])) $ext['photo_count'] = $piData['photo_count'];
+                                    if (!empty($piData['status'])) $ext['pi_status'] = $piData['status'];
+                                    
+                                    // Mark as non-active if PI says closed
+                                    if (isset($piData['is_active']) && !$piData['is_active']) {
+                                        $r['url_dead'] = true;
+                                        $r['url_dead_reason'] = 'pi_listing_closed';
+                                    }
+                                    
+                                    unset($ext);
+                                }
+                            }
+                        } catch (\Throwable $e) {
+                            error_log("PI Extractor error for {$url}: " . $e->getMessage());
+                        }
+                    }
                 }
             }
         }
@@ -379,6 +423,24 @@ class SearchOrchestrator {
         }
 
         $ranked = array_slice($ranked, 0, $maxResults);
+
+        // === Phase 2: Result Classification (PROPERTY_DETAIL, LISTING_PAGE, BLOCKED) ===
+        if ($vertical === 'real_estate') {
+            $blockedCount = 0;
+            foreach ($ranked as &$r) {
+                $r['classification'] = self::classifyResult($r, $vertical);
+                if ($r['classification'] === 'BLOCKED') {
+                    $blockedCount++;
+                }
+            }
+            unset($r);
+            
+            // Remove blocked results
+            if ($blockedCount > 0) {
+                $ranked = array_values(array_filter($ranked, fn($r) => $r['classification'] !== 'BLOCKED'));
+                $this->emitProgress('blocked_filtered', "{$blockedCount} URLs bloqueadas (google/redirects)");
+            }
+        }
 
         // ===== NEW IN V3: GeoResolver + CandidateValidator =====
 
@@ -506,9 +568,15 @@ class SearchOrchestrator {
             $diagnostics['filter_summary'] = CandidateValidator::summarizeFilter($filterResult);
         }
 
+        // Determine mode via ModeRouter
+        $modeResult = ModeRouter::route($userMessage, $vertical);
+        $mode = $modeResult['mode'];
+
         $response = [
             'results' => $this->cleanResultsForOutput($filteredForLLM),
             'vertical' => $vertical,
+            'mode' => $mode,
+            'mode_confidence' => $modeResult['confidence'],
             'intent' => $intent,
             'queries_used' => $searchQueries,
             'context_queries_used' => $contextQueries,
@@ -812,6 +880,17 @@ class SearchOrchestrator {
                 $num++;
                 $this->appendResultToContext($ctx, $r, $num, $vertical);
 
+                // Add PI Extractor enriched data if available
+                if (!empty($r['pi_extracted'])) {
+                    $piCtx = PortalInmobiliarioExtractor::formatForContext($r['pi_extracted']);
+                    if ($piCtx) {
+                        $ctx .= "   🏠 DATOS EXTRAÍDOS (Portal Inmobiliario):\n";
+                        foreach (explode("\n", $piCtx) as $piLine) {
+                            $ctx .= "      {$piLine}\n";
+                        }
+                    }
+                }
+
                 // Add validation info
                 $validation = $r['validation'] ?? null;
                 if ($validation && !empty($validation['warnings'])) {
@@ -934,6 +1013,97 @@ class SearchOrchestrator {
         $pUnit = $intent['presupuesto']['moneda'] ?? 'UF';
         if ($pMax) $parts[] = 'hasta ' . number_format($pMax, 0, ',', '.') . ' ' . $pUnit;
         return !empty($parts) ? 'Detectado: ' . implode(' ', $parts) : 'Analizando búsqueda...';
+    }
+
+    /**
+     * Fetch full HTML for deep extraction (PI Extractor needs full page)
+     */
+    private function fetchFullHtml(string $url, int $timeout = 8): ?string {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 3,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            CURLOPT_HTTPHEADER => [
+                'Accept: text/html,application/xhtml+xml',
+                'Accept-Language: es-CL,es;q=0.9',
+            ],
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_ENCODING => 'gzip, deflate',
+        ]);
+        
+        $html = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        
+        if ($httpCode === 200 && $html && strlen($html) > 1000) {
+            return $html;
+        }
+        return null;
+    }
+
+    /**
+     * Classify a search result as PROPERTY_DETAIL, LISTING_PAGE, or IRRELEVANT
+     * Used in Phase 2 search quality enforcement
+     */
+    public static function classifyResult(array $result, string $vertical): string {
+        if ($vertical !== 'real_estate') {
+            return 'INFO'; // Non-RE results are just info
+        }
+        
+        $url = $result['url'] ?? '';
+        $host = parse_url($url, PHP_URL_HOST) ?? '';
+        $path = parse_url($url, PHP_URL_PATH) ?? '';
+        $urlType = $result['extracted']['url_type'] ?? 'unknown';
+        
+        // Hard block: google.com/search, redirect URLs
+        if (str_contains($host, 'google.com') && str_contains($path, '/search')) {
+            return 'BLOCKED';
+        }
+        if (str_contains($url, 'redirect') || str_contains($url, 'click?')) {
+            return 'BLOCKED';
+        }
+        
+        // PI extractor data overrides
+        if (!empty($result['pi_extracted'])) {
+            $pi = $result['pi_extracted'];
+            if (!empty($pi['is_detail_page'])) return 'PROPERTY_DETAIL';
+            if (($pi['page_type'] ?? '') === 'SEARCH') return 'LISTING_PAGE';
+        }
+        
+        // URL-based classification
+        if ($urlType === 'specific') {
+            // Has detail signals (price, m², etc.)
+            $ext = $result['extracted'] ?? [];
+            $detailSignals = 0;
+            if (!empty($ext['price_uf']) || !empty($ext['price_clp'])) $detailSignals++;
+            if (!empty($ext['area_m2']) || !empty($ext['surface_total'])) $detailSignals++;
+            if (!empty($ext['bedrooms'])) $detailSignals++;
+            if (!empty($ext['latitude'])) $detailSignals++;
+            
+            return $detailSignals >= 1 ? 'PROPERTY_DETAIL' : 'PROPERTY_DETAIL'; // Specific URLs are detail by default
+        }
+        
+        if ($urlType === 'listing') {
+            return 'LISTING_PAGE';
+        }
+        
+        // Check if it's a property portal but not a specific listing
+        $reWhitelistDomains = ['portalinmobiliario.com', 'toctoc.com', 'yapo.cl', 'chilepropiedades.cl', 'goplaceit.com'];
+        foreach ($reWhitelistDomains as $d) {
+            if (str_contains($host, $d)) {
+                // If short path, it's likely a listing/search page
+                if (substr_count(trim($path, '/'), '/') <= 1) {
+                    return 'LISTING_PAGE';
+                }
+                return 'PROPERTY_DETAIL';
+            }
+        }
+        
+        return 'IRRELEVANT';
     }
 
     private function cleanResultsForOutput(array $results): array {

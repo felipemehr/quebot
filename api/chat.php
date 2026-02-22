@@ -6,6 +6,7 @@ require_once __DIR__ . '/../services/legal/LegalSearch.php';
 require_once __DIR__ . '/../services/ProfileBuilder.php';
 require_once __DIR__ . '/../services/FirestoreAudit.php';
 require_once __DIR__ . '/../services/ResponseVerifier.php';
+require_once __DIR__ . '/../services/ModeRouter.php';
 
 // Content-Type set per request method (SSE for POST, JSON for GET/OPTIONS)
 
@@ -500,6 +501,15 @@ if ($ufData) {
     $ufContext .= "Conversiones: 1 hectárea (ha) = 10.000 m². 1 cuadra = 1,57 ha = 15.700 m².\n";
 }
 
+// === MODE ROUTING (Mini MoE) ===
+$modeResult = ModeRouter::route($message);
+$detectedMode = $modeResult['mode'];
+$modeConfidence = $modeResult['confidence'];
+$modeLabel = ModeRouter::getModeLabel($detectedMode);
+
+// Emit mode detection to SSE for frontend display
+emitSSE('step', ['stage' => 'mode_detected', 'detail' => "Modo: {$modeLabel} (confianza: " . round($modeConfidence * 100) . "%)"]);
+
 // === SEARCH VIA ORCHESTRATOR ===
 $searchContext = '';
 $searchVertical = null;
@@ -551,6 +561,8 @@ if ($shouldSearch) {
                 'user_id' => $userId,
                 'user_query' => $searchQuery,
                 'vertical' => $searchVertical,
+                'mode' => $detectedMode,
+                'mode_confidence' => $modeConfidence,
                 'intent' => $searchIntent,
                 'queries_built' => $searchQueriesUsed,
                 'provider' => $searchProviderUsed,
@@ -854,6 +866,9 @@ emitSSE('done', [
         'search_insufficient' => $searchInsufficient,
     ],
     'search_intent' => $searchIntent,
-    'profile_update' => $profileUpdate
+    'profile_update' => $profileUpdate,
+    'mode' => $detectedMode,
+    'mode_label' => $modeLabel,
+    'mode_confidence' => $modeConfidence,
 ]);
 ?>
