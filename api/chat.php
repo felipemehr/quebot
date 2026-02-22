@@ -780,7 +780,8 @@ try {
     $profileBuilder = new ProfileBuilder(CLAUDE_API_KEY);
     if ($profileBuilder->shouldExtract($message)) {
         $profileStart = microtime(true);
-        $profileUpdate = $profileBuilder->extractProfile($message, $reply, $userProfile);
+        $currentVertical = $searchVertical ?? ($vertical ?? null);
+        $profileUpdate = $profileBuilder->extractProfile($message, $reply, $userProfile, $currentVertical);
         $profileTimingMs = round((microtime(true) - $profileStart) * 1000);
         if ($profileUpdate) {
             error_log("ProfileBuilder: Profile updated (" . count(array_filter($profileUpdate, fn($v) => $v !== null && $v !== [])) . " fields) in {$profileTimingMs}ms");

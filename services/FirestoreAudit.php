@@ -254,10 +254,10 @@ class FirestoreAudit {
             return 'production';
         } elseif (strpos($host, 'spirited-purpose') !== false) {
             return 'staging';
+        } elseif (strpos($host, 'charming-embrace') !== false) {
+            return 'lab';
         } elseif (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
             return 'local';
-        } elseif (strpos($host, 'lab') !== false) {
-            return 'lab';
         }
         
         // Check RAILWAY_ENVIRONMENT or similar env vars as fallback

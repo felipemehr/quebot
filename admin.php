@@ -378,7 +378,7 @@ function renderTable() {
     }
     
     // Computed columns always shown regardless of data
-    const computedCols = ['tipo', 'casos', 'perfil', 'messages'];
+    const computedCols = ['tipo', 'casos', 'perfil', 'messages', 'environment'];
     const availCols = cols.filter(c => computedCols.includes(c) || data.some(row => row[c] !== undefined && row[c] !== ''));
     
     let html = '<table><thead><tr>';
