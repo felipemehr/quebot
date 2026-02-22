@@ -26,6 +26,10 @@ class UrlHealthChecker {
         '/_NoIndex_True',
         '/resultados?',
         '/buscar?',
+        '/gz/account-verification',      // PI login wall redirect
+        '/registration-pi?',             // PI registration redirect
+        '/login?next=',                   // Generic login redirect
+        '/acceso?',                       // Spanish login redirect
     ];
     
     private static $SPECIFIC_PATTERNS = [
