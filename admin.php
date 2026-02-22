@@ -769,35 +769,43 @@ function renderExplorer() {
                         const label = labels[key] || key;
                         let display;
 
-                        // Arrays → render each element as a pill, handling mixed types
+                        // Arrays → deduplicate by name, show latest/highest confidence
                         if (Array.isArray(value) && value.length > 0) {
-                            display = value.map(item => {
+                            // Extract all items as {name, confidence, mentions}
+                            const items = [];
+                            for (const item of value) {
                                 if (typeof item === 'string') {
-                                    // Could be a plain string or a JSON string
                                     try {
                                         const parsed = JSON.parse(item);
                                         if (typeof parsed === 'object' && parsed !== null) {
                                             const n = parsed.name || parsed.value || parsed.label;
                                             if (n) {
                                                 const c = parsed.confidence !== undefined ? parsed.confidence : (parsed.weight !== undefined ? parsed.weight / 10 : null);
-                                                return renderPill(n, c, parsed.mentions);
+                                                items.push({ name: n, confidence: c, mentions: parsed.mentions });
+                                                continue;
                                             }
                                         }
                                     } catch(e) {}
-                                    return renderPill(item);
+                                    items.push({ name: item, confidence: null, mentions: null });
                                 } else if (typeof item === 'object' && item !== null) {
-                                    const itemName = item.name || item.value || item.label || null;
-                                    if (itemName) {
-                                        const conf = item.confidence !== undefined ? item.confidence : (item.weight !== undefined ? item.weight / 10 : null);
-                                        return renderPill(itemName, conf, item.mentions);
+                                    const n = item.name || item.value || item.label;
+                                    if (n) {
+                                        const c = item.confidence !== undefined ? item.confidence : (item.weight !== undefined ? item.weight / 10 : null);
+                                        items.push({ name: n, confidence: c, mentions: item.mentions });
                                     }
-                                    // Object without name — skip metadata-only objects
-                                    const meaningful = Object.keys(item).filter(k => !skipFields.includes(k) && k !== 'weight' && k !== 'mentions' && k !== 'confidence');
-                                    if (meaningful.length === 0) return '';
-                                    return renderPill(meaningful.map(k => k + ': ' + item[k]).join(', '));
+                                } else {
+                                    items.push({ name: String(item), confidence: null, mentions: null });
                                 }
-                                return renderPill(String(item));
-                            }).filter(x => x).join('');
+                            }
+                            // Deduplicate: keep highest confidence per name
+                            const deduped = new Map();
+                            for (const it of items) {
+                                const existing = deduped.get(it.name);
+                                if (!existing || (it.confidence !== null && (existing.confidence === null || it.confidence > existing.confidence))) {
+                                    deduped.set(it.name, it);
+                                }
+                            }
+                            display = Array.from(deduped.values()).map(it => renderPill(it.name, it.confidence, it.mentions)).filter(x => x).join('');
                             if (!display) display = '<span style="color:#9ca3af;font-size:11px">Sin datos</span>';
                         }
                         // Behavioral signals → special format
