@@ -742,22 +742,41 @@ function renderExplorer() {
                         behavioral_signals: '📊 Comportamiento',
                         profile_confidence_score: '🎯 Confianza'
                     };
+                    // Helper to render a profile item as a pill badge
+                    function renderPill(name, conf, mentions, extra) {
+                        const confPct = conf !== undefined && conf !== null ? (conf <= 1 ? (conf*100).toFixed(0) : parseFloat(conf).toFixed(0)) : null;
+                        const confColor = confPct >= 70 ? '#10b981' : confPct >= 40 ? '#f59e0b' : '#ef4444';
+                        let pill = '<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 8px;background:#fff;border-radius:12px;font-size:11px;border:1px solid #e5e7eb">';
+                        pill += '<strong>' + name + '</strong>';
+                        if (confPct !== null) pill += ' <span style="color:' + confColor + ';font-size:10px">' + confPct + '%</span>';
+                        if (mentions && mentions > 1) pill += ' <span style="color:#9ca3af;font-size:9px">(' + mentions + 'x)</span>';
+                        if (extra) pill += ' <span style="color:#9ca3af;font-size:9px">' + extra + '</span>';
+                        pill += '</span>';
+                        return pill;
+                    }
+
+                    // Fields to skip in rendering
+                    const skipFields = ['updated_at', 'last_sanitized', 'profile_version', 'first_seen', 'last_seen', 'migrated_from_v1'];
+
                     for (const [key, value] of Object.entries(profile)) {
-                        if (key === 'updated_at' || key === 'last_sanitized' || key === 'profile_version') continue;
+                        if (skipFields.includes(key)) continue;
                         const label = labels[key] || key;
                         let display;
-                        if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0].name) {
+
+                        // Array of objects with name/value property → pill badges
+                        if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object') {
                             display = value.map(item => {
-                                const conf = item.confidence !== undefined ? (item.confidence * 100).toFixed(0) : '?';
-                                const mentions = item.mentions || 1;
-                                const confColor = conf >= 70 ? '#10b981' : conf >= 40 ? '#f59e0b' : '#ef4444';
-                                return '<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 6px;background:#fff;border-radius:10px;font-size:11px;border:1px solid #e5e7eb">'
-                                    + item.name
-                                    + ' <span style="color:' + confColor + ';font-size:10px">' + conf + '%</span>'
-                                    + ' <span style="color:#9ca3af;font-size:9px">(' + mentions + 'x)</span>'
-                                    + '</span>';
+                                const itemName = item.name || item.value || item.label || Object.values(item).find(v => typeof v === 'string') || JSON.stringify(item);
+                                const conf = item.confidence !== undefined ? item.confidence : (item.weight !== undefined ? item.weight / 10 : null);
+                                return renderPill(itemName, conf, item.mentions);
                             }).join('');
-                        } else if (key === 'behavioral_signals' && typeof value === 'object') {
+                        }
+                        // Array of strings → pill badges
+                        else if (Array.isArray(value) && value.length > 0) {
+                            display = value.map(v => renderPill(String(v))).join('');
+                        }
+                        // Behavioral signals → special format
+                        else if (key === 'behavioral_signals' && typeof value === 'object') {
                             const dom = value.dominant_intent || '-';
                             const pct = value.dominant_pct || 0;
                             const dist = value.intent_distribution || {};
@@ -767,7 +786,9 @@ function renderExplorer() {
                                 display += intent + ': ' + count + ' | ';
                             }
                             display = display.replace(/ \| $/, '') + '</div>';
-                        } else if (key === 'profile_confidence_score') {
+                        }
+                        // Confidence score → progress bar
+                        else if (key === 'profile_confidence_score') {
                             const score = parseFloat(value);
                             const barColor = score >= 0.7 ? '#10b981' : score >= 0.4 ? '#f59e0b' : '#ef4444';
                             display = '<div style="display:flex;align-items:center;gap:6px">'
@@ -775,17 +796,26 @@ function renderExplorer() {
                                 + '<div style="width:' + (score*100) + '%;height:100%;background:' + barColor + ';border-radius:3px"></div>'
                                 + '</div>'
                                 + '<span style="font-size:11px">' + (score*100).toFixed(0) + '%</span></div>';
-                        } else if (key === 'budget' && typeof value === 'object') {
+                        }
+                        // Budget → formatted range
+                        else if (key === 'budget' && typeof value === 'object') {
                             const min = value.min || 0;
                             const max = value.max || 0;
                             const unit = value.unit || 'UF';
                             const conf = value.confidence ? ' (' + (value.confidence*100).toFixed(0) + '%)' : '';
-                            display = (min ? min + ' - ' : 'hasta ') + max.toLocaleString() + ' ' + unit + conf;
-                        } else if (Array.isArray(value)) {
-                            display = value.join(', ');
-                        } else if (typeof value === 'object') {
-                            display = JSON.stringify(value);
-                        } else {
+                            display = (min ? min.toLocaleString() + ' - ' : 'hasta ') + max.toLocaleString() + ' ' + unit + conf;
+                        }
+                        // Other objects → pretty key-value display
+                        else if (typeof value === 'object' && value !== null) {
+                            display = '<div style="font-size:11px">';
+                            for (const [k, v] of Object.entries(value)) {
+                                if (skipFields.includes(k)) continue;
+                                display += '<div style="margin:1px 0"><span style="color:#6b7280">' + k + ':</span> ' + (typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</div>';
+                            }
+                            display += '</div>';
+                        }
+                        // Simple values
+                        else {
                             display = String(value);
                         }
                         html += '<div style="margin-bottom:8px"><div style="font-size:11px;color:#6b7280;font-weight:600">' + label + '</div><div style="font-size:12px;margin-top:2px">' + display + '</div></div>';
