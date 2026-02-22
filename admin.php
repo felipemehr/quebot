@@ -288,7 +288,7 @@ function updateStats() {
 
 
 
-// Firestore value parser
+// Firestore value parser — preserves native JS types for maps/arrays
 function parseVal(v) {
     if (!v) return '';
     if (v.stringValue !== undefined) return v.stringValue;
@@ -297,8 +297,9 @@ function parseVal(v) {
     if (v.booleanValue !== undefined) return v.booleanValue ? '✅' : '❌';
     if (v.timestampValue) return new Date(v.timestampValue).toLocaleString('es-CL');
     if (v.nullValue !== undefined) return '-';
-    if (v.mapValue) return JSON.stringify(Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k,val]) => [k, parseVal(val)])));
-    if (v.arrayValue) return (v.arrayValue.values || []).map(parseVal).join(', ');
+    // Maps & arrays: return NATIVE types so profile rendering works properly
+    if (v.mapValue) return Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k,val]) => [k, parseVal(val)]));
+    if (v.arrayValue) return (v.arrayValue.values || []).map(parseVal);
     return JSON.stringify(v);
 }
 
@@ -471,7 +472,12 @@ function renderTable() {
                 val = val.substring(0, 12) + '...';
             }
             
-            html += `<td title="${String(row[c] || '').replace(/"/g, '&quot;')}">${val}</td>`;
+            // Flatten complex types for table display
+            if (typeof val === 'object' && val !== null) {
+                val = Array.isArray(val) ? val.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(', ') : JSON.stringify(val);
+            }
+            const titleText = String(val || '').replace(/<[^>]*>/g, '').replace(/"/g, '&quot;');
+            html += `<td title="${titleText}">${val}</td>`;
         });
         html += '</tr>';
     });
@@ -611,7 +617,7 @@ function showProfile(userId) {
                 html += '<dt>' + label + '</dt><dd>' + display + '</dd>';
             }
         } catch(e) {
-            html += '<dt>Raw</dt><dd>' + sp + '</dd>';
+            html += '<dt>Raw</dt><dd>' + (typeof sp === 'string' ? sp : JSON.stringify(sp, null, 2)) + '</dd>';
         }
         html += '</dl>';
     } else {
@@ -840,7 +846,7 @@ function renderExplorer() {
                         html += '<div style="margin-bottom:8px"><div style="font-size:11px;color:#6b7280;font-weight:600">' + label + '</div><div style="font-size:12px;margin-top:2px">' + display + '</div></div>';
                     }
                 } catch(e) {
-                    html += '<div style="font-size:12px;color:#888">Error al parsear perfil: ' + sp.substring(0, 200) + '</div>';
+                    html += '<div style="font-size:12px;color:#888">Error al parsear perfil: ' + (typeof sp === 'string' ? sp.substring(0, 200) : JSON.stringify(sp).substring(0, 200)) + '</div>';
                 }
                 html += '</div>';
 
