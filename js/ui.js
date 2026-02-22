@@ -408,6 +408,9 @@ const UI = {
         // Post-process: wrap tables for horizontal scroll
         this.wrapTablesForScroll(div);
 
+        // Post-process: enhance property portal links and risk flags
+        this.enhancePropertyLinks(div);
+
         // Make all links open in new tab
         div.querySelectorAll('a[href^="http"]').forEach(link => {
             link.setAttribute('target', '_blank');
@@ -440,6 +443,41 @@ const UI = {
             wrapper.className = 'table-wrapper';
             table.parentNode.insertBefore(wrapper, table);
             wrapper.appendChild(table);
+        });
+    },
+
+    /**
+     * Enhance property portal links with badges and flag risk items
+     */
+    enhancePropertyLinks(container) {
+        // Add domain badges to property portal links
+        const portalBadges = {
+            'portalinmobiliario.com': { label: 'PI', color: '#10b981', bg: '#ecfdf5' },
+            'toctoc.com': { label: 'TocToc', color: '#3b82f6', bg: '#eff6ff' },
+            'yapo.cl': { label: 'Yapo', color: '#f97316', bg: '#fff7ed' },
+            'goplaceit.com': { label: 'GoPlaceit', color: '#14b8a6', bg: '#f0fdfa' },
+            'chilepropiedades.cl': { label: 'ChileProp', color: '#8b5cf6', bg: '#f5f3ff' }
+        };
+
+        container.querySelectorAll('a[href]').forEach(link => {
+            const href = link.getAttribute('href') || '';
+            for (const [domain, badge] of Object.entries(portalBadges)) {
+                if (href.includes(domain)) {
+                    const span = document.createElement('span');
+                    span.className = 'portal-badge';
+                    span.style.cssText = `color:${badge.color};background:${badge.bg};`;
+                    span.textContent = badge.label;
+                    link.parentNode.insertBefore(span, link.nextSibling);
+                    break;
+                }
+            }
+        });
+
+        // Enhance risk flags
+        container.querySelectorAll('.message-body li, .message-body p').forEach(el => {
+            if (el.textContent.includes('⚠️') || el.textContent.includes('🚩')) {
+                el.classList.add('risk-flag');
+            }
         });
     },
 
@@ -481,6 +519,9 @@ const UI = {
             
             // Wrap tables
             this.wrapTablesForScroll(lastMessage);
+
+            // Enhance property portal links and risk flags
+            this.enhancePropertyLinks(lastMessage);
             
             // Make all links open in new tab
             bodyEl.querySelectorAll('a[href^="http"]').forEach(link => {

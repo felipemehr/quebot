@@ -1539,6 +1539,80 @@ textarea {
 }
 
 /* ========================================
+   Enhanced Table Styling (Property Cards)
+   ======================================== */
+
+.message-body tr:nth-child(even) {
+    background: var(--bg-tertiary);
+}
+
+.message-body tr:hover {
+    background: var(--bg-hover);
+    transition: background 0.15s ease;
+}
+
+.message-body td:first-child {
+    font-weight: 550;
+}
+
+/* ========================================
+   Property Portal Link Badges
+   ======================================== */
+
+.portal-badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 4px;
+    font-weight: 600;
+    vertical-align: middle;
+    line-height: 1.6;
+}
+
+/* ========================================
+   Section Headers Enhancement (Phase 6)
+   ======================================== */
+
+.message.assistant .message-body h2 {
+    border-left: 4px solid var(--accent-primary);
+    padding-left: 12px;
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+
+.message.assistant .message-body h3 {
+    border-left: 3px solid var(--accent-secondary);
+    padding-left: 10px;
+    margin-top: 16px;
+    margin-bottom: 8px;
+}
+
+/* ========================================
+   Risk Flag Styling
+   ======================================== */
+
+.risk-flag {
+    background: rgba(245, 158, 11, 0.1);
+    border-left: 3px solid #f59e0b;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin: 4px 0;
+}
+
+[data-theme="dark"] .risk-flag {
+    background: rgba(245, 158, 11, 0.08);
+}
+
+/* ========================================
+   Calibration Question Styling
+   ======================================== */
+
+.message.assistant .message-body ol li {
+    padding: 2px 0;
+}
+
+/* ========================================
    Responsive Design - Tablet
    ======================================== */
 
